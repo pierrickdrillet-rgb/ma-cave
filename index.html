@@ -1,0 +1,1140 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="theme-color" content="#14100c">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<title>Ma Cave — Gestion & Accords</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,wght@0,500;0,600;0,700;1,500&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+<script src="https://accounts.google.com/gsi/client"></script>
+<script src="https://apis.google.com/js/api.js"></script>
+<style>
+  :root{
+    --bg-950:#14100c;
+    --bg-900:#1d1712;
+    --line:rgba(255,255,255,0.08);
+    --cream:#f2ece2;
+    --muted:#a89a8d;
+    --wine:#7a1f2b;
+    --wine-light:#9c3040;
+    --gold:#c9a15a;
+  }
+  body{ font-family:'Inter',sans-serif; }
+  .font-serif-display{ font-family:'Fraunces',serif; }
+  ::selection{ background:var(--wine); color:var(--cream); }
+  .loader{ border:2.5px solid rgba(201,161,90,0.25); border-bottom-color:var(--gold); border-radius:50%; display:inline-block; box-sizing:border-box; animation:rot 0.9s linear infinite; }
+  @keyframes rot{ to{ transform:rotate(360deg);} }
+  .line-clamp-2{ display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
+  input:focus, select:focus, textarea:focus{ outline:none; }
+</style>
+</head>
+<body style="background:var(--bg-950);color:var(--cream)" class="min-h-screen pb-16">
+
+  <div class="max-w-3xl mx-auto px-4 py-6 md:py-8">
+
+    <header class="flex items-start justify-between gap-4 mb-7">
+      <div>
+        <p class="text-[13px] mb-1" style="color:var(--muted)">Cave personnelle</p>
+        <h1 class="font-serif-display text-[28px] md:text-[34px] font-semibold leading-tight">Ma Cave</h1>
+        <p id="storageIndicator" class="text-[12px] mt-1.5" style="color:var(--muted)"></p>
+      </div>
+      <div class="flex items-center gap-2 shrink-0">
+        <button onclick="openHelpModal()" aria-label="Sauvegarde et options" class="w-10 h-10 rounded-full border flex items-center justify-center transition" style="border-color:var(--line);color:var(--muted)">
+          <svg class="w-[18px] h-[18px]" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.8"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
+        </button>
+        <button onclick="openModal()" class="font-medium px-4 md:px-5 py-2.5 rounded-full shadow-lg transition flex items-center gap-2" style="background:var(--wine);color:var(--cream)">
+          <svg class="w-[18px] h-[18px]" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4v16m8-8H4"/></svg>
+          <span class="hidden sm:inline">Ajouter une bouteille</span>
+          <span class="sm:hidden">Ajouter</span>
+        </button>
+      </div>
+    </header>
+
+    <section class="mb-8 rounded-2xl p-5 md:p-6" style="background:var(--bg-900);border:1px solid var(--line)">
+      <h2 class="font-serif-display text-[20px] md:text-[22px] mb-1" style="color:var(--gold)">Quel vin pour ce soir ?</h2>
+      <p class="text-[13px] mb-4" style="color:var(--muted)">Décrivez le plat, ou choisissez une suggestion — l'accord est calculé à partir des bouteilles réellement disponibles dans votre cave.</p>
+      <div class="flex flex-col sm:flex-row gap-2.5 mb-3">
+        <input type="text" id="dishInput" placeholder="Ex. choucroute, magret, plateau de fromages…" onkeydown="if(event.key==='Enter') suggestPairing()" class="flex-1 rounded-xl px-4 py-3 text-[14px] transition" style="background:var(--bg-950);border:1px solid var(--line);color:var(--cream)">
+        <button onclick="suggestPairing()" class="font-semibold px-6 py-3 rounded-xl transition" style="background:var(--gold);color:var(--bg-950)">Proposer un accord</button>
+      </div>
+      <div class="flex flex-wrap gap-2" id="dishChips"></div>
+      <div id="pairingResult" class="mt-4 hidden pt-4" style="border-top:1px solid var(--line)"></div>
+    </section>
+
+    <div class="flex flex-col gap-3 mb-5">
+      <div class="relative">
+        <span class="absolute inset-y-0 left-0 flex items-center pl-3.5" style="color:var(--muted)">
+          <svg class="w-4 h-4" fill="none" viewBox="0 0 20 20" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="m19 19-4-4m0-7A7 7 0 1 1 1 8a7 7 0 0 1 14 0Z"/></svg>
+        </span>
+        <input type="text" id="searchInput" oninput="renderApp()" placeholder="Rechercher dans votre cave…" class="w-full rounded-xl pl-10 pr-4 py-3 text-[14px] transition" style="background:var(--bg-900);border:1px solid var(--line);color:var(--cream)">
+      </div>
+      <div class="flex gap-2 overflow-x-auto pb-1" id="categoryFilters"></div>
+    </div>
+
+    <div id="inventoryList" class="flex flex-col gap-2.5"></div>
+    <div id="emptyState" class="hidden text-center py-16 px-4 rounded-2xl mt-2" style="background:rgba(29,23,18,.5);border:1px dashed var(--line)"></div>
+  </div>
+
+  <!-- Modal Ajout/Édition -->
+  <div id="bottleModal" class="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4 hidden">
+    <div class="rounded-2xl w-full max-w-md p-6 shadow-2xl relative max-h-[90vh] overflow-y-auto" style="background:var(--bg-900);border:1px solid var(--line)">
+      <h2 id="modalTitle" class="font-serif-display text-[20px] mb-4" style="color:var(--gold)">Ajouter une bouteille</h2>
+      <form id="bottleForm" onsubmit="handleFormSubmit(event)" class="space-y-4">
+        <input type="hidden" id="bottleId">
+
+        <div class="p-4 rounded-xl" style="background:var(--bg-950);border:1px solid var(--line)">
+          <label class="block text-[13px] font-medium mb-2 flex items-center gap-1.5" style="color:var(--gold)">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.8"><path stroke-linecap="round" stroke-linejoin="round" d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M15 13a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
+            <span>Lire l'étiquette (photo)</span>
+          </label>
+          <input type="file" id="photoCaptureInput" accept="image/*" capture="environment" class="w-full text-[12px] cursor-pointer" style="color:var(--muted)">
+          <div id="aiFeedback" class="text-[11.5px] mt-2 leading-relaxed" style="color:var(--muted)">
+            Prenez une photo nette de l'étiquette : le nom et la catégorie seront proposés automatiquement, à vérifier avant d'enregistrer.
+          </div>
+        </div>
+
+        <div>
+          <label class="block text-[13px] font-medium mb-1" style="color:var(--muted)">Nom</label>
+          <input type="text" id="nameInput" required placeholder="Ex. Château Haut Selve" class="w-full rounded-xl px-3 py-2.5 text-[14px]" style="background:var(--bg-950);border:1px solid var(--line);color:var(--cream)">
+        </div>
+
+        <div>
+          <label class="block text-[13px] font-medium mb-1" style="color:var(--muted)">Catégorie</label>
+          <select id="catInput" required class="w-full rounded-xl px-3 py-2.5 text-[14px]" style="background:var(--bg-950);border:1px solid var(--line);color:var(--cream)"></select>
+          <p class="text-[11.5px] mt-1" style="color:var(--muted)">Sert à filtrer votre cave et à proposer des accords fiables.</p>
+        </div>
+
+        <div>
+          <label class="block text-[13px] font-medium mb-1" style="color:var(--muted)">Détail <span class="font-normal">(facultatif)</span></label>
+          <input type="text" id="detailInput" placeholder="Ex. cépage, appellation, millésime" class="w-full rounded-xl px-3 py-2.5 text-[14px]" style="background:var(--bg-950);border:1px solid var(--line);color:var(--cream)">
+        </div>
+
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <label class="block text-[13px] font-medium mb-1" style="color:var(--muted)">Quantité</label>
+            <input type="number" id="qtyInput" min="0" value="1" required class="w-full rounded-xl px-3 py-2.5 text-[14px]" style="background:var(--bg-950);border:1px solid var(--line);color:var(--cream)">
+          </div>
+          <div>
+            <label class="block text-[13px] font-medium mb-1" style="color:var(--muted)">Statut</label>
+            <select id="statusInput" class="w-full rounded-xl px-3 py-2.5 text-[14px]" style="background:var(--bg-950);border:1px solid var(--line);color:var(--cream)">
+              <option value="En stock">En stock</option>
+              <option value="Bientôt fini">Bientôt fini</option>
+              <option value="Terminé">Terminé</option>
+            </select>
+          </div>
+        </div>
+
+        <div>
+          <label class="block text-[13px] font-medium mb-1" style="color:var(--muted)">Prix estimé <span class="font-normal">(facultatif)</span></label>
+          <input type="text" id="priceInput" placeholder="Ex. 15€ – 20€" class="w-full rounded-xl px-3 py-2.5 text-[14px]" style="background:var(--bg-950);border:1px solid var(--line);color:var(--cream)">
+          <p class="text-[11.5px] mt-1" style="color:var(--muted)">Affiché uniquement si renseigné — jamais deviné automatiquement.</p>
+        </div>
+
+        <div>
+          <label class="block text-[13px] font-medium mb-1" style="color:var(--muted)">Notes de dégustation <span class="font-normal">(facultatif)</span></label>
+          <textarea id="notesInput" rows="2" placeholder="Ex. idéal avec un plat mijoté…" class="w-full rounded-xl px-3 py-2 text-[14px]" style="background:var(--bg-950);border:1px solid var(--line);color:var(--cream)"></textarea>
+        </div>
+        <input type="hidden" id="imageUrlInput">
+
+        <div class="flex justify-end gap-3 pt-4" style="border-top:1px solid var(--line)">
+          <button type="button" onclick="closeModal()" class="px-4 py-2 rounded-xl text-[14px] font-medium" style="color:var(--muted)">Annuler</button>
+          <button type="submit" id="submitFormBtn" class="font-medium px-5 py-2 rounded-xl text-[14px] shadow-lg transition" style="background:var(--wine);color:var(--cream)">Enregistrer</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Modal Sauvegarde / Aide -->
+  <div id="helpModal" class="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4 hidden">
+    <div class="rounded-2xl w-full max-w-md p-6 shadow-2xl relative" style="background:var(--bg-900);border:1px solid var(--line)">
+      <h2 class="font-serif-display text-[20px] mb-3" style="color:var(--gold)">Sauvegarde & données</h2>
+      <p id="storageExplain" class="text-[13px] leading-relaxed mb-5" style="color:var(--muted)"></p>
+
+      <div id="driveSection" class="mb-5"></div>
+
+      <div class="space-y-2.5">
+        <button onclick="exportData()" class="w-full flex items-center justify-between rounded-xl px-4 py-3 text-[14px] transition" style="background:var(--bg-950);border:1px solid var(--line);color:var(--cream)">
+          <span>Exporter une sauvegarde</span>
+          <svg class="w-4 h-4" style="color:var(--muted)" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M4 16v2a2 2 0 002 2h12a2 2 0 002-2v-2M7 10l5 5 5-5M12 15V3"/></svg>
+        </button>
+        <label class="w-full flex items-center justify-between rounded-xl px-4 py-3 text-[14px] cursor-pointer transition" style="background:var(--bg-950);border:1px solid var(--line);color:var(--cream)">
+          <span>Importer une sauvegarde</span>
+          <svg class="w-4 h-4" style="color:var(--muted)" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M4 16v2a2 2 0 002 2h12a2 2 0 002-2v-2M17 8l-5-5-5 5M12 3v12"/></svg>
+          <input type="file" accept="application/json" class="hidden" onchange="if(this.files[0]) importData(this.files[0]); this.value='';">
+        </label>
+        <button onclick="resetData()" class="w-full flex items-center justify-between rounded-xl px-4 py-3 text-[14px] transition" style="background:var(--bg-950);border:1px solid rgba(159,45,63,.4);color:#e08a97">
+          <span>Réinitialiser toutes les données</span>
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6M9 7V4a1 1 0 011-1h4a1 1 0 011 1v3M4 7h16"/></svg>
+        </button>
+      </div>
+
+      <button type="button" onclick="closeHelpModal()" class="mt-5 w-full text-center text-[13px] py-2" style="color:var(--muted)">Fermer</button>
+    </div>
+  </div>
+
+<script>
+  const CATEGORIES = [
+    { key:'rouge', label:'Vin rouge', color:'#8c2a37', emoji:'🍷' },
+    { key:'blanc', label:'Vin blanc', color:'#c9a15a', emoji:'🥂' },
+    { key:'rose', label:'Vin rosé', color:'#d98a95', emoji:'🌸' },
+    { key:'bulles', label:'Bulles', color:'#e8c874', emoji:'🍾' },
+    { key:'cuit', label:'Vin cuit / apéritif', color:'#b0703a', emoji:'🍯' },
+    { key:'spiritueux', label:'Spiritueux', color:'#8a5a2b', emoji:'🥃' },
+    { key:'sans_alcool', label:'Sans alcool', color:'#5a8a76', emoji:'🍹' },
+  ];
+  const CAT_BY_KEY = Object.fromEntries(CATEGORIES.map(c => [c.key, c]));
+
+  const DISH_CHIPS = [
+    { label:'🥩 Viande rouge', text:'viande rouge' },
+    { label:'🐟 Poisson', text:'poisson' },
+    { label:'🧀 Fromage / raclette', text:'fromage raclette' },
+    { label:'🍫 Dessert', text:'dessert chocolat' },
+    { label:'🌶️ Plat épicé', text:'plat épicé' },
+    { label:'🥂 Apéritif', text:'apéritif' },
+  ];
+
+  const PAIRING_RULES = [
+    { keywords:['choucroute'], ideal:['blanc','bulles'], reason:"Une choucroute veut de la fraîcheur et de l'acidité : un blanc sec (type riesling) ou des bulles font l'affaire." },
+    { keywords:['saucisse','lentille','mijoté','pot au feu','potée','bourguignon','daube'], ideal:['rouge'], reason:"Un plat mijoté et rustique appelle un rouge charpenté mais peu acide, pour accompagner sans écraser." },
+    { keywords:['poisson','fruits de mer','saumon','crevette','huître','sushi','coquillage'], ideal:['blanc','bulles','rose'], reason:"Poissons et fruits de mer s'accordent naturellement avec un blanc vif, un rosé ou des bulles." },
+    { keywords:['volaille','poulet','dinde','pintade'], ideal:['blanc','rouge'], reason:"La volaille est polyvalente : un blanc rond ou un rouge léger fonctionnent selon la sauce." },
+    { keywords:['épicé','curry','piment','asiatique','thaï','indien','wok'], ideal:['blanc','cuit'], reason:"Sur un plat épicé, un blanc légèrement rond ou un vin cuit adoucissent la sensation de piquant." },
+    { keywords:['fromage','raclette','fondue'], ideal:['rouge','blanc'], reason:"Fromages et raclette se marient bien avec un rouge léger ou un blanc de caractère selon les fromages." },
+    { keywords:['chocolat','dessert','pâtisserie','gâteau','tarte'], ideal:['spiritueux','cuit'], reason:"Sur le sucré, un vieux rhum ou un vin cuit apportent un accord de caractère plutôt qu'un vin classique." },
+    { keywords:['bœuf','magret','agneau','steak','entrecôte','viande rouge','gibier'], ideal:['rouge'], reason:"Les viandes rouges réclament des tanins présents pour sublimer le plat." },
+    { keywords:['apéro','apéritif','tapas','entrée','planche'], ideal:['bulles','cuit','blanc'], reason:"Pour un apéritif, on privilégie la fraîcheur et la légèreté : bulles, vin cuit ou blanc vif." },
+    { keywords:['salade','été','estival','léger','pique-nique'], ideal:['blanc','rose'], reason:"Un repas léger et estival appelle un blanc ou un rosé rafraîchissant." },
+  ];
+
+  function normalize(str){
+    return (str || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim();
+  }
+
+  let bottles = [];
+  let activeCategory = 'Tous';
+  let bottlesLoaded = false;
+
+  // ====================================================================
+  // Synchronisation Google Drive — partagée entre deux comptes Google
+  // ====================================================================
+  // Pour activer la synchronisation partagée :
+  //  1. Créez un identifiant OAuth gratuit sur https://console.cloud.google.com/apis/credentials
+  //     (type "ID client OAuth" > "Application Web") et ajoutez comme "Origine JavaScript
+  //     autorisée" l'adresse https où vous hébergez CETTE page (Google refuse file://).
+  //  2. Dans "Écran de consentement OAuth", statut "Test" : ajoutez VOTRE email ET celui de
+  //     votre conjointe comme "utilisateurs test" (obligatoire pour que les deux comptes
+  //     puissent se connecter tant que l'appli n'est pas publiée officiellement).
+  //  3. Activez l'API "Google Picker" (console > APIs & Services > Bibliothèque), puis créez
+  //     une "Clé API" (Identifiants > Créer des identifiants > Clé API), et restreignez-la à
+  //     l'API Picker + à votre domaine https pour la sécurité.
+  //  4. Collez votre Client ID et votre clé API ci-dessous.
+  // Tant que ce n'est pas fait, l'application continue de fonctionner normalement en local.
+  const GOOGLE_CLIENT_ID = 'VOTRE_CLIENT_ID.apps.googleusercontent.com';
+  const GOOGLE_API_KEY = 'VOTRE_CLE_API';
+  const DRIVE_SCOPE = 'https://www.googleapis.com/auth/drive.file';
+  const DRIVE_FILENAME = 'Ma Cave - données partagées.json';
+  const DRIVE_CONFIGURED = GOOGLE_CLIENT_ID.indexOf('VOTRE_CLIENT_ID') === -1;
+  const PICKER_CONFIGURED = GOOGLE_API_KEY.indexOf('VOTRE_CLE_API') === -1;
+
+  let pickerLoaded = false;
+
+  const Drive = {
+    tokenClient: null,
+    accessToken: null,
+    tokenExpiry: 0,
+    fileId: null,
+    email: null,
+    ready: false,
+    signedIn: false,
+
+    init(){
+      this.fileId = localStorage.getItem('driveFileId') || null;
+      this.email = localStorage.getItem('driveEmail') || null;
+      this.signedIn = localStorage.getItem('driveSignedIn') === '1';
+      if (!DRIVE_CONFIGURED || location.protocol === 'file:') return;
+      if (!window.google || !google.accounts || !google.accounts.oauth2) return;
+      try {
+        this.tokenClient = google.accounts.oauth2.initTokenClient({
+          client_id: GOOGLE_CLIENT_ID,
+          scope: DRIVE_SCOPE,
+          callback: () => {}
+        });
+        this.ready = true;
+      } catch(e){ console.error(e); this.ready = false; }
+    },
+
+    requestToken(interactive){
+      return new Promise((resolve, reject) => {
+        if (!this.ready){ reject(new Error('non initialisé')); return; }
+        this.tokenClient.callback = (resp) => {
+          if (resp.error){ reject(resp); return; }
+          this.accessToken = resp.access_token;
+          this.tokenExpiry = Date.now() + (resp.expires_in * 1000) - 60000;
+          resolve(resp);
+        };
+        this.tokenClient.requestAccessToken({ prompt: interactive ? 'consent' : '' });
+      });
+    },
+
+    async ensureToken(){
+      if (this.accessToken && Date.now() < this.tokenExpiry) return true;
+      try { await this.requestToken(false); return true; }
+      catch(e){ return false; }
+    },
+
+    disconnect(){
+      this.signedIn = false;
+      this.accessToken = null;
+      this.fileId = null;
+      this.email = null;
+      localStorage.removeItem('driveSignedIn');
+      localStorage.removeItem('driveFileId');
+      localStorage.removeItem('driveEmail');
+    },
+
+    unlinkFile(){
+      this.fileId = null;
+      localStorage.removeItem('driveFileId');
+    },
+
+    async fetchProfile(){
+      try {
+        const r = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', { headers:{ Authorization:'Bearer ' + this.accessToken } });
+        if (r.ok){ const j = await r.json(); this.email = j.email || null; localStorage.setItem('driveEmail', this.email || ''); }
+      } catch(e){}
+    },
+
+    async verifyFile(fileId){
+      try {
+        const r = await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}?fields=id`, { headers:{ Authorization:'Bearer ' + this.accessToken } });
+        return r.ok;
+      } catch(e){ return false; }
+    },
+
+    async createFile(payload){
+      const metadata = { name: DRIVE_FILENAME };
+      const boundary = 'macave314159265';
+      const body =
+        `--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${JSON.stringify(metadata)}\r\n` +
+        `--${boundary}\r\nContent-Type: application/json\r\n\r\n${JSON.stringify(payload)}\r\n--${boundary}--`;
+      const res = await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id', {
+        method: 'POST',
+        headers: { Authorization: 'Bearer ' + this.accessToken, 'Content-Type': `multipart/related; boundary=${boundary}` },
+        body
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json && json.error ? json.error.message : 'création impossible');
+      return json.id;
+    },
+
+    async pull(){
+      const ok = await this.ensureToken();
+      if (!ok || !this.fileId) return null;
+      const res = await fetch(`https://www.googleapis.com/drive/v3/files/${this.fileId}?alt=media`, { headers:{ Authorization:'Bearer ' + this.accessToken } });
+      if (!res.ok) return null;
+      try { return await res.json(); } catch(e){ return null; }
+    },
+
+    async push(payload){
+      const ok = await this.ensureToken();
+      if (!ok || !this.fileId) return false;
+      const res = await fetch(`https://www.googleapis.com/upload/drive/v3/files/${this.fileId}?uploadType=media`, {
+        method: 'PATCH',
+        headers: { Authorization: 'Bearer ' + this.accessToken, 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      return res.ok;
+    },
+
+    async shareWithEmail(email){
+      const ok = await this.ensureToken();
+      if (!ok || !this.fileId) return false;
+      try {
+        const res = await fetch(`https://www.googleapis.com/drive/v3/files/${this.fileId}/permissions?sendNotificationEmail=true`, {
+          method: 'POST',
+          headers: { Authorization: 'Bearer ' + this.accessToken, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ role: 'writer', type: 'user', emailAddress: email })
+        });
+        return res.ok;
+      } catch(e){ console.error(e); return false; }
+    }
+  };
+
+  // ---------- Fusion fiable multi-appareils / multi-comptes ----------
+  // Chaque bouteille porte un "updatedAt". Les suppressions posent une marque
+  // (tombstone) au lieu d'effacer la ligne, pour ne jamais faire réapparaître
+  // une bouteille supprimée par l'autre personne suite à une fusion. Les
+  // tombstones trop anciennes (>180 jours) sont purgées automatiquement.
+  const TOMBSTONE_TTL_MS = 1000 * 60 * 60 * 24 * 180;
+
+  function mergeBottles(localList, remoteList){
+    const map = new Map();
+    (remoteList || []).forEach(b => map.set(b.id, b));
+    (localList || []).forEach(b => {
+      const existing = map.get(b.id);
+      if (!existing || (b.updatedAt || 0) >= (existing.updatedAt || 0)) map.set(b.id, b);
+    });
+    const now = Date.now();
+    const merged = Array.from(map.values()).filter(b => !(b.deleted && (now - (b.updatedAt || 0)) > TOMBSTONE_TTL_MS));
+    merged.sort((a, b) => (b.id || 0) - (a.id || 0));
+    return merged;
+  }
+
+  function visibleBottles(){
+    return bottles.filter(b => !b.deleted);
+  }
+
+  function persistLocal(){
+    try { localStorage.setItem('bottles', JSON.stringify(bottles)); }
+    catch(e){ showToast("Échec de l'enregistrement local", 'error'); }
+  }
+
+  function esc(str){
+    if (str === null || str === undefined) return '';
+    return String(str).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  }
+
+  function showToast(msg, type){
+    let t = document.getElementById('toast');
+    if (!t){ t = document.createElement('div'); t.id = 'toast'; document.body.appendChild(t); }
+    t.textContent = msg;
+    t.style.position = 'fixed'; t.style.left = '50%'; t.style.bottom = '24px'; t.style.transform = 'translateX(-50%)';
+    t.style.padding = '10px 18px'; t.style.borderRadius = '999px'; t.style.fontSize = '13px'; t.style.fontWeight = '500';
+    t.style.zIndex = '200'; t.style.transition = 'opacity .3s'; t.style.boxShadow = '0 10px 30px rgba(0,0,0,.4)';
+    t.style.background = type === 'error' ? '#9f2d3f' : '#3f6b52';
+    t.style.color = '#f2ece2';
+    t.style.opacity = '1';
+    clearTimeout(t._timer);
+    t._timer = setTimeout(() => { t.style.opacity = '0'; }, 1900);
+  }
+
+  async function boot(){
+    Drive.init();
+    renderCategoryOptions();
+    renderDishChips();
+
+    let raw = null;
+    try { raw = localStorage.getItem('bottles'); } catch(e){}
+    try {
+      bottles = raw ? JSON.parse(raw) : [];
+      if (!Array.isArray(bottles)) bottles = [];
+    } catch(e){ bottles = []; }
+    bottlesLoaded = true;
+    updateStorageIndicator();
+    renderApp();
+
+    if (Drive.signedIn && Drive.fileId){
+      await syncNow(false);
+    }
+  }
+
+  function updateStorageIndicator(){
+    const el = document.getElementById('storageIndicator');
+    const explain = document.getElementById('storageExplain');
+    if (Drive.signedIn && Drive.fileId){
+      el.innerHTML = `<span style="color:#c9a15a">●</span> Cave partagée synchronisée${Drive.email ? ' ('+esc(Drive.email)+')' : ''}`;
+      if (explain) explain.textContent = "Votre cave est enregistrée dans un fichier Google Drive que vous pouvez partager avec une autre personne. Chacun retrouve et modifie la même liste depuis son propre compte Google.";
+    } else if (Drive.signedIn){
+      el.innerHTML = '<span style="color:#c9a15a">●</span> Connecté à Google — aucune cave liée';
+      if (explain) explain.textContent = "Vous êtes connecté à Google mais aucune cave partagée n'est encore liée. Créez-en une, ou rejoignez celle que quelqu'un vous a partagée.";
+    } else {
+      el.innerHTML = '<span style="color:#a89a8d">●</span> Sauvegardé sur cet appareil uniquement';
+      if (explain) explain.textContent = "Votre cave est enregistrée uniquement dans ce navigateur. Connectez Google Drive (bouton ci-dessous) pour la partager entre plusieurs comptes, ou exportez/importez une sauvegarde manuellement.";
+    }
+  }
+
+  // Sauvegarde locale immédiate, puis fusion fiable avec la version Drive
+  // (on retire toujours la dernière version distante avant d'écrire, pour ne
+  // jamais écraser une modification faite entre-temps par l'autre personne).
+  async function saveData(){
+    persistLocal();
+    if (Drive.signedIn && Drive.fileId){
+      try {
+        const remote = await Drive.pull();
+        const remoteList = (remote && Array.isArray(remote.bottles)) ? remote.bottles : [];
+        const merged = mergeBottles(bottles, remoteList);
+        bottles = merged;
+        persistLocal();
+        const ok = await Drive.push({ bottles: merged });
+        if (!ok) showToast('Google Drive indisponible — sauvegardé sur cet appareil', 'error');
+        renderApp();
+      } catch(e){
+        console.error(e);
+        showToast('Google Drive indisponible — sauvegardé sur cet appareil', 'error');
+      }
+    }
+  }
+
+  async function syncNow(manual){
+    if (!Drive.signedIn || !Drive.fileId){ updateStorageIndicator(); return; }
+    try {
+      const ok = await Drive.ensureToken();
+      if (!ok){
+        if (manual) showToast('Reconnexion Google requise', 'error');
+        updateStorageIndicator();
+        return;
+      }
+      const remote = await Drive.pull();
+      const remoteList = (remote && Array.isArray(remote.bottles)) ? remote.bottles : [];
+      const merged = mergeBottles(bottles, remoteList);
+      bottles = merged;
+      persistLocal();
+      renderApp();
+      await Drive.push({ bottles: merged });
+      if (manual) showToast('Cave synchronisée');
+    } catch(e){
+      console.error(e);
+      if (manual) showToast('Synchronisation impossible', 'error');
+    }
+    updateStorageIndicator();
+  }
+
+  async function connectDrive(){
+    if (location.protocol === 'file:'){
+      showToast('Hébergez cette page en https pour activer Drive (voir le guide)', 'error');
+      return;
+    }
+    if (!DRIVE_CONFIGURED){
+      showToast('Configurez d\'abord votre Client ID Google (voir le guide)', 'error');
+      return;
+    }
+    if (!Drive.ready){
+      showToast('Service Google indisponible pour le moment', 'error');
+      return;
+    }
+    try {
+      await Drive.requestToken(true);
+      Drive.signedIn = true;
+      localStorage.setItem('driveSignedIn', '1');
+      await Drive.fetchProfile();
+      if (Drive.fileId){
+        const stillValid = await Drive.verifyFile(Drive.fileId);
+        if (!stillValid) Drive.unlinkFile();
+      }
+      if (Drive.fileId){
+        await syncNow(true);
+      } else {
+        updateStorageIndicator();
+      }
+      renderHelpDriveSection();
+    } catch(e){
+      showToast('Connexion Google annulée', 'error');
+    }
+  }
+
+  function disconnectDrive(){
+    if (!confirm('Se déconnecter de Google Drive ? Vos bouteilles restent sur cet appareil mais ne seront plus synchronisées.')) return;
+    Drive.disconnect();
+    updateStorageIndicator();
+    renderHelpDriveSection();
+    showToast('Déconnecté de Google Drive');
+  }
+
+  function unlinkDriveFile(){
+    if (!confirm('Se délier de cette cave partagée ? Vous resterez connecté à Google mais devrez recréer ou rejoindre une cave.')) return;
+    Drive.unlinkFile();
+    updateStorageIndicator();
+    renderHelpDriveSection();
+  }
+
+  async function createSharedCave(){
+    const ok = await Drive.ensureToken();
+    if (!ok){ showToast('Connexion Google requise', 'error'); return; }
+    try {
+      const fileId = await Drive.createFile({ bottles });
+      Drive.fileId = fileId;
+      localStorage.setItem('driveFileId', fileId);
+      await syncNow(true);
+      renderHelpDriveSection();
+      showToast('Cave créée sur Google Drive — partagez-la ci-dessous');
+    } catch(e){
+      console.error(e);
+      showToast('Création impossible', 'error');
+    }
+  }
+
+  function loadPicker(){
+    return new Promise((resolve) => {
+      if (pickerLoaded){ resolve(true); return; }
+      if (!window.gapi){ resolve(false); return; }
+      try { gapi.load('picker', { callback: () => { pickerLoaded = true; resolve(true); } }); }
+      catch(e){ resolve(false); }
+    });
+  }
+
+  async function joinSharedCave(){
+    if (!PICKER_CONFIGURED){
+      showToast('Clé API Google Picker non configurée (voir le guide)', 'error');
+      return;
+    }
+    const loaded = await loadPicker();
+    if (!loaded){ showToast('Google Picker indisponible (vérifiez votre connexion)', 'error'); return; }
+    const ok = await Drive.ensureToken();
+    if (!ok){ showToast('Connexion Google requise', 'error'); return; }
+    const view = new google.picker.DocsView(google.picker.ViewId.DOCS)
+      .setIncludeFolders(false)
+      .setMimeTypes('application/json');
+    const picker = new google.picker.PickerBuilder()
+      .setOAuthToken(Drive.accessToken)
+      .setDeveloperKey(GOOGLE_API_KEY)
+      .addView(view)
+      .setCallback(async (data) => {
+        if (data.action === google.picker.Action.PICKED){
+          const file = data.docs[0];
+          Drive.fileId = file.id;
+          localStorage.setItem('driveFileId', file.id);
+          await syncNow(true);
+          renderHelpDriveSection();
+        }
+      })
+      .build();
+    picker.setVisible(true);
+  }
+
+  async function shareDriveFile(){
+    const input = document.getElementById('shareEmailInput');
+    const email = (input.value || '').trim();
+    if (!email){ showToast('Entrez une adresse email', 'error'); return; }
+    const ok = await Drive.shareWithEmail(email);
+    if (ok){ showToast('Invitation envoyée à ' + email); input.value = ''; }
+    else showToast('Partage impossible', 'error');
+  }
+
+  function renderHelpDriveSection(){
+    const el = document.getElementById('driveSection');
+    if (!el) return;
+    if (!DRIVE_CONFIGURED){
+      el.innerHTML = `<div class="rounded-xl px-4 py-3 text-[12.5px] leading-relaxed" style="background:var(--bg-950);border:1px dashed var(--line);color:var(--muted)">
+        🔧 Synchronisation Google Drive non configurée. Suivez le guide fourni pour créer un identifiant Google gratuit et l'activer.
+      </div>`;
+      return;
+    }
+    if (location.protocol === 'file:'){
+      el.innerHTML = `<div class="rounded-xl px-4 py-3 text-[12.5px] leading-relaxed" style="background:var(--bg-950);border:1px dashed var(--line);color:var(--muted)">
+        🔧 Ouvrez cette page depuis une adresse https (ex. GitHub Pages) pour activer Google Drive.
+      </div>`;
+      return;
+    }
+    if (!Drive.signedIn){
+      el.innerHTML = `
+        <button onclick="connectDrive()" class="w-full flex items-center justify-center gap-2 rounded-xl px-4 py-3 text-[14px] font-medium" style="background:var(--gold);color:var(--bg-950)">
+          Connecter Google Drive
+        </button>
+        <p class="text-[11.5px] mt-1.5" style="color:var(--muted)">Gratuit — vous pourrez ensuite créer votre cave ou rejoindre celle de votre conjointe.</p>
+      `;
+      return;
+    }
+    if (!Drive.fileId){
+      el.innerHTML = `
+        <div class="rounded-xl px-4 py-3 mb-2" style="background:var(--bg-950);border:1px solid var(--line)">
+          <p class="text-[14px] font-medium">Connecté${Drive.email ? ' — ' + esc(Drive.email) : ''}</p>
+          <p class="text-[12px] mt-0.5" style="color:var(--muted)">Aucune cave partagée liée pour l'instant.</p>
+        </div>
+        <div class="flex flex-col gap-2">
+          <button onclick="createSharedCave()" class="w-full rounded-xl px-4 py-3 text-[14px] font-medium" style="background:var(--gold);color:var(--bg-950)">Créer une nouvelle cave partagée</button>
+          <button onclick="joinSharedCave()" class="w-full rounded-xl px-4 py-3 text-[14px] font-medium" style="background:var(--bg-950);border:1px solid var(--line);color:var(--cream)">Rejoindre une cave qu'on m'a partagée</button>
+        </div>
+      `;
+      return;
+    }
+    el.innerHTML = `
+      <div class="flex items-center justify-between rounded-xl px-4 py-3 mb-2" style="background:var(--bg-950);border:1px solid var(--line)">
+        <div class="min-w-0">
+          <p class="text-[14px] font-medium">Cave partagée liée</p>
+          <p class="text-[12px] truncate" style="color:var(--muted)">${esc(Drive.email || '')}</p>
+        </div>
+        <span style="color:#7fbf9c">●</span>
+      </div>
+      <div class="flex gap-2 mb-2">
+        <input type="email" id="shareEmailInput" placeholder="email de votre conjointe" class="flex-1 rounded-xl px-3 py-2 text-[13px]" style="background:var(--bg-950);border:1px solid var(--line);color:var(--cream)">
+        <button onclick="shareDriveFile()" class="rounded-xl px-3 py-2 text-[13px] font-medium" style="background:var(--gold);color:var(--bg-950)">Partager</button>
+      </div>
+      <div class="flex gap-2">
+        <button onclick="syncNow(true)" class="flex-1 rounded-xl px-3 py-2 text-[13px] font-medium" style="background:var(--bg-950);border:1px solid var(--line);color:var(--cream)">Synchroniser</button>
+        <button onclick="unlinkDriveFile()" class="rounded-xl px-3 py-2 text-[13px]" style="background:var(--bg-950);border:1px solid var(--line);color:var(--muted)">Changer de cave</button>
+        <button onclick="disconnectDrive()" class="rounded-xl px-3 py-2 text-[13px]" style="background:var(--bg-950);border:1px solid rgba(159,45,63,.4);color:#e08a97">Déconnecter</button>
+      </div>
+    `;
+  }
+
+  function renderCategoryOptions(){
+    const sel = document.getElementById('catInput');
+    sel.innerHTML = '<option value="" disabled selected>— Choisir —</option>' +
+      CATEGORIES.map(c => `<option value="${c.key}">${c.emoji} ${c.label}</option>`).join('');
+  }
+
+  function renderDishChips(){
+    const wrap = document.getElementById('dishChips');
+    wrap.innerHTML = DISH_CHIPS.map(c => `
+      <button type="button" onclick="quickDish('${c.text}')" class="text-[12.5px] px-3 py-1.5 rounded-full transition" style="border:1px solid var(--line);color:var(--muted)">${c.label}</button>
+    `).join('');
+  }
+
+  function quickDish(text){
+    document.getElementById('dishInput').value = text;
+    suggestPairing();
+  }
+
+  // ---------- Sommelier ----------
+  function suggestPairing(){
+    const raw = document.getElementById('dishInput').value;
+    const input = normalize(raw);
+    const resultDiv = document.getElementById('pairingResult');
+
+    if (!input){
+      resultDiv.innerHTML = `<p style="color:var(--gold)">Décrivez un plat, ou choisissez une suggestion ci-dessus.</p>`;
+      resultDiv.classList.remove('hidden');
+      return;
+    }
+
+    const inStock = visibleBottles().filter(b => (b.qty || 0) > 0 && b.status !== 'Terminé');
+
+    let best = null, bestScore = 0;
+    const matchedIdeal = new Set();
+    PAIRING_RULES.forEach(rule => {
+      const score = rule.keywords.filter(k => input.includes(normalize(k))).length;
+      if (score > 0){
+        rule.ideal.forEach(c => matchedIdeal.add(c));
+        if (score > bestScore){ bestScore = score; best = rule; }
+      }
+    });
+
+    let reasonText, idealSet;
+    if (matchedIdeal.size > 0){
+      idealSet = matchedIdeal;
+      reasonText = best.reason;
+    } else {
+      idealSet = new Set(['rouge', 'blanc']);
+      reasonText = "Ce plat ne fait pas partie de nos suggestions habituelles : un rouge léger ou un blanc sec restent des valeurs sûres et polyvalentes.";
+    }
+
+    let matches = inStock.filter(b => idealSet.has(b.category));
+    let fallbackNote = '';
+    if (matches.length === 0 && inStock.length > 0){
+      matches = inStock;
+      fallbackNote = "Rien de parfaitement adapté n'est disponible actuellement — voici ce qu'il vous reste en stock :";
+    }
+
+    let html = `<p class="font-medium mb-3" style="color:var(--gold)">${esc(reasonText)}</p>`;
+    if (fallbackNote) html += `<p class="text-[13px] mb-2" style="color:var(--muted)">${fallbackNote}</p>`;
+
+    if (matches.length > 0){
+      html += `<div class="flex flex-col gap-2">` + matches.slice(0, 5).map(b => {
+        const cat = CAT_BY_KEY[b.category];
+        return `<div class="flex items-center justify-between rounded-lg px-3.5 py-2.5" style="background:var(--bg-950);border:1px solid var(--line)">
+          <div class="flex items-center gap-2.5 min-w-0">
+            <span>${cat ? cat.emoji : '🍾'}</span>
+            <div class="min-w-0">
+              <p class="text-[14px] font-medium truncate" style="color:var(--cream)">${esc(b.name)}</p>
+              <p class="text-[11.5px] truncate" style="color:var(--muted)">${esc(b.detail || (cat ? cat.label : ''))}</p>
+            </div>
+          </div>
+          <span class="text-[12px] shrink-0 ml-2" style="color:var(--muted)">×${b.qty}</span>
+        </div>`;
+      }).join('') + `</div>`;
+    } else {
+      html += `<p class="text-[13px]" style="color:var(--muted)">Votre cave est vide pour l'instant — ajoutez quelques bouteilles pour recevoir des suggestions.</p>`;
+    }
+
+    resultDiv.innerHTML = html;
+    resultDiv.classList.remove('hidden');
+  }
+
+  // ---------- Rendu principal ----------
+  function renderApp(){
+    const search = normalize(document.getElementById('searchInput').value);
+    const list = document.getElementById('inventoryList');
+    const empty = document.getElementById('emptyState');
+    const filters = document.getElementById('categoryFilters');
+
+    const chipKeys = ['Tous', ...CATEGORIES.map(c => c.key)];
+    filters.innerHTML = chipKeys.map(key => {
+      const isAll = key === 'Tous';
+      const cat = isAll ? null : CAT_BY_KEY[key];
+      const label = isAll ? 'Tous' : `${cat.emoji} ${cat.label}`;
+      const active = activeCategory === key;
+      const style = active
+        ? 'background:var(--gold);color:var(--bg-950);border:1px solid var(--gold)'
+        : 'background:var(--bg-900);color:var(--muted);border:1px solid var(--line)';
+      return `<button onclick="setCategory('${key}')" class="px-3.5 py-2 rounded-full text-[13px] font-medium whitespace-nowrap transition" style="${style}">${label}</button>`;
+    }).join('');
+
+    if (!bottlesLoaded){
+      list.innerHTML = '';
+      empty.innerHTML = `<div class="loader w-6 h-6 mx-auto mb-3"></div><p style="color:var(--muted)">Chargement de votre cave…</p>`;
+      empty.classList.remove('hidden');
+      return;
+    }
+
+    if (visibleBottles().length === 0){
+      list.innerHTML = '';
+      empty.innerHTML = `
+        <p class="text-4xl mb-3">🍾</p>
+        <p class="font-serif-display text-[18px] mb-1">Votre cave est vide</p>
+        <p class="text-[13px] mb-4" style="color:var(--muted)">Ajoutez votre première bouteille pour commencer à suivre votre stock et recevoir des accords.</p>
+        <button onclick="openModal()" class="inline-flex items-center gap-2 px-5 py-2.5 rounded-full font-medium text-[14px]" style="background:var(--wine);color:var(--cream)">Ajouter ma première bouteille</button>
+      `;
+      empty.classList.remove('hidden');
+      return;
+    }
+
+    const filtered = visibleBottles().filter(b => {
+      const mCat = activeCategory === 'Tous' || b.category === activeCategory;
+      const hay = normalize(`${b.name} ${b.detail || ''} ${b.notes || ''}`);
+      const mSearch = !search || hay.includes(search);
+      return mCat && mSearch;
+    });
+
+    if (filtered.length === 0){
+      list.innerHTML = '';
+      empty.innerHTML = `<p class="text-4xl mb-2">🔍</p><p style="color:var(--muted)">Aucune bouteille ne correspond à votre recherche.</p>`;
+      empty.classList.remove('hidden');
+      return;
+    }
+    empty.classList.add('hidden');
+
+    list.innerHTML = filtered.map(b => {
+      const cat = CAT_BY_KEY[b.category] || { color: '#a89a8d', emoji: '🍾', label: '' };
+      let statusStyle = 'background:rgba(63,107,82,.18);color:#7fbf9c';
+      if (b.status === 'Bientôt fini') statusStyle = 'background:rgba(201,161,90,.18);color:#c9a15a';
+      if (b.status === 'Terminé') statusStyle = 'background:rgba(159,45,63,.18);color:#e08a97';
+
+      return `
+        <div class="flex items-center gap-3.5 rounded-xl px-4 py-3.5 transition-colors" style="background:var(--bg-900);border-left:4px solid ${cat.color}">
+          <div class="shrink-0 w-12 h-12 rounded-lg overflow-hidden flex items-center justify-center text-xl" style="background:var(--bg-950);border:1px solid var(--line)">
+            ${b.image ? `<img src="${b.image}" class="w-full h-full object-cover" alt="">` : cat.emoji}
+          </div>
+          <div class="flex-1 min-w-0">
+            <div class="flex items-baseline gap-2 flex-wrap">
+              <h3 class="font-serif-display text-[16px] font-semibold truncate" style="color:var(--cream)">${esc(b.name)}</h3>
+              ${b.detail ? `<span class="text-[12px] truncate" style="color:var(--muted)">${esc(b.detail)}</span>` : ''}
+            </div>
+            <div class="flex items-center gap-2 mt-1 flex-wrap">
+              <span class="text-[11px] px-2 py-0.5 rounded-full" style="${statusStyle}">${b.status}</span>
+              ${b.price ? `<span class="text-[11px]" style="color:var(--gold)">${esc(b.price)}</span>` : ''}
+            </div>
+            ${b.notes ? `<p class="text-[12px] italic mt-1.5 leading-relaxed line-clamp-2" style="color:#cabcae">${esc(b.notes)}</p>` : ''}
+          </div>
+          <div class="flex flex-col items-end gap-2 shrink-0">
+            <div class="flex items-center gap-0.5 rounded-lg" style="background:var(--bg-950);border:1px solid var(--line)">
+              <button onclick="adjustQty(${b.id},-1)" aria-label="Retirer une bouteille" class="w-7 h-7 flex items-center justify-center" style="color:var(--muted)">−</button>
+              <span class="text-[13px] font-semibold w-5 text-center" style="color:var(--cream)">${b.qty}</span>
+              <button onclick="adjustQty(${b.id},1)" aria-label="Ajouter une bouteille" class="w-7 h-7 flex items-center justify-center" style="color:var(--muted)">+</button>
+            </div>
+            <div class="flex gap-1">
+              <button onclick="editBottle(${b.id})" aria-label="Modifier" class="p-1.5 rounded-lg" style="color:var(--muted);background:var(--bg-950);border:1px solid var(--line)">
+                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/></svg>
+              </button>
+              <button onclick="deleteBottle(${b.id})" aria-label="Supprimer" class="p-1.5 rounded-lg" style="color:var(--muted);background:var(--bg-950);border:1px solid var(--line)">
+                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6M9 7V4a1 1 0 011-1h4a1 1 0 011 1v3M4 7h16"/></svg>
+              </button>
+            </div>
+          </div>
+        </div>
+      `;
+    }).join('');
+  }
+
+  function setCategory(cat){ activeCategory = cat; renderApp(); }
+
+  async function adjustQty(id, delta){
+    const b = bottles.find(i => i.id === id);
+    if (!b) return;
+    b.qty = Math.max(0, (b.qty || 0) + delta);
+    if (b.qty === 0) b.status = 'Terminé';
+    else if (b.status === 'Terminé') b.status = 'En stock';
+    b.updatedAt = Date.now();
+    await saveData();
+    renderApp();
+  }
+
+  async function deleteBottle(id){
+    if (!confirm('Supprimer définitivement cette bouteille ?')) return;
+    const b = bottles.find(i => i.id === id);
+    if (!b) return;
+    b.deleted = true;
+    b.updatedAt = Date.now();
+    await saveData();
+    renderApp();
+    showToast('Bouteille supprimée');
+  }
+
+  // ---------- Modal ajout/édition ----------
+  function openModal(id){
+    document.getElementById('bottleModal').classList.remove('hidden');
+    document.getElementById('photoCaptureInput').value = '';
+    document.getElementById('aiFeedback').textContent = "Prenez une photo nette de l'étiquette : le nom et la catégorie seront proposés automatiquement, à vérifier avant d'enregistrer.";
+
+    if (id){
+      const b = bottles.find(i => i.id === id);
+      if (!b) return;
+      document.getElementById('modalTitle').textContent = 'Modifier la bouteille';
+      document.getElementById('bottleId').value = b.id;
+      document.getElementById('catInput').value = b.category || '';
+      document.getElementById('nameInput').value = b.name || '';
+      document.getElementById('detailInput').value = b.detail || '';
+      document.getElementById('qtyInput').value = b.qty;
+      document.getElementById('statusInput').value = b.status;
+      document.getElementById('priceInput').value = b.price || '';
+      document.getElementById('notesInput').value = b.notes || '';
+      document.getElementById('imageUrlInput').value = b.image || '';
+    } else {
+      document.getElementById('modalTitle').textContent = 'Ajouter une bouteille';
+      document.getElementById('bottleForm').reset();
+      document.getElementById('bottleId').value = '';
+      document.getElementById('imageUrlInput').value = '';
+    }
+  }
+
+  function closeModal(){ document.getElementById('bottleModal').classList.add('hidden'); }
+  function editBottle(id){ openModal(id); }
+
+  function openHelpModal(){ renderHelpDriveSection(); document.getElementById('helpModal').classList.remove('hidden'); }
+  function closeHelpModal(){ document.getElementById('helpModal').classList.add('hidden'); }
+
+  async function handleFormSubmit(e){
+    e.preventDefault();
+    const id = document.getElementById('bottleId').value;
+    const data = {
+      id: id ? parseInt(id) : Date.now(),
+      category: document.getElementById('catInput').value,
+      name: document.getElementById('nameInput').value.trim(),
+      detail: document.getElementById('detailInput').value.trim(),
+      qty: parseInt(document.getElementById('qtyInput').value) || 0,
+      status: document.getElementById('statusInput').value,
+      price: document.getElementById('priceInput').value.trim(),
+      notes: document.getElementById('notesInput').value.trim(),
+      image: document.getElementById('imageUrlInput').value,
+      updatedAt: Date.now()
+    };
+    if (!data.category){ showToast('Choisissez une catégorie', 'error'); return; }
+    if (id){
+      const idx = bottles.findIndex(b => b.id === parseInt(id));
+      if (idx > -1) bottles[idx] = data;
+    } else {
+      bottles.unshift(data);
+    }
+    await saveData();
+    closeModal();
+    renderApp();
+    showToast('Bouteille enregistrée');
+  }
+
+  // ---------- OCR étiquette ----------
+  function loadImageEl(file){
+    return new Promise((resolve, reject) => {
+      const img = new Image();
+      img.onload = () => resolve(img);
+      img.onerror = reject;
+      img.src = URL.createObjectURL(file);
+    });
+  }
+
+  function makeOcrCanvas(img){
+    const maxDim = 1400;
+    let w = img.width, h = img.height;
+    if (w > maxDim){ h = Math.round(h * (maxDim / w)); w = maxDim; }
+    const canvas = document.createElement('canvas');
+    canvas.width = w; canvas.height = h;
+    const ctx = canvas.getContext('2d');
+    ctx.drawImage(img, 0, 0, w, h);
+    try {
+      const imageData = ctx.getImageData(0, 0, w, h);
+      const d = imageData.data;
+      for (let i = 0; i < d.length; i += 4){
+        const gray = 0.299 * d[i] + 0.587 * d[i+1] + 0.114 * d[i+2];
+        let val = (gray - 128) * 1.35 + 128;
+        val = Math.max(0, Math.min(255, val));
+        d[i] = d[i+1] = d[i+2] = val;
+      }
+      ctx.putImageData(imageData, 0, 0);
+    } catch(e){ /* preprocessing best-effort */ }
+    return canvas;
+  }
+
+  function makeThumbnail(img, maxDim, quality){
+    maxDim = maxDim || 480; quality = quality || 0.72;
+    let w = img.width, h = img.height;
+    if (w > h){ if (w > maxDim){ h = Math.round(h * (maxDim / w)); w = maxDim; } }
+    else { if (h > maxDim){ w = Math.round(w * (maxDim / h)); h = maxDim; } }
+    const canvas = document.createElement('canvas');
+    canvas.width = w; canvas.height = h;
+    const ctx = canvas.getContext('2d');
+    ctx.drawImage(img, 0, 0, w, h);
+    return canvas.toDataURL('image/jpeg', quality);
+  }
+
+  const BOILERPLATE = [/appellation/i, /produit de france/i, /product of/i, /mis en bouteille/i, /contient des sulfites/i, /consommer avec mod/i, /\bvol\.?\s*\d/i, /^\d+\s?(cl|ml|l)\b/i, /^[0-9\s.,%°]+$/, /^\d{1,3}[.,]?\d*\s?%$/];
+  const DOMAINE_WORDS = /château|chateau|domaine|clos|mas\s|cave\s|maison|bodega|tenuta|weingut/i;
+
+  const KW_SPIRIT = ['rhum', 'whisky', 'whiskey', 'vodka', 'gin', 'cognac', 'armagnac', 'tequila', 'calvados', 'liqueur'];
+  const KW_CUIT = ['muscat', 'martini', 'vermouth', 'pommeau', 'banyuls', 'porto', 'pineau', 'ratafia'];
+  const KW_BULLES = ['champagne', 'crémant', 'brut', 'prosecco', 'cava', 'mousseux', 'pétillant'];
+  const KW_ROSE = ['rosé', 'tavel'];
+  const KW_BLANC = ['blanc', 'riesling', 'chardonnay', 'sauvignon', 'muscadet', 'chablis', 'pouilly', 'gewürztraminer', 'viognier', 'pinot gris'];
+  const KW_ROUGE = ['rouge', 'pinot noir', 'merlot', 'syrah', 'cabernet', 'malbec', 'grenache', 'tannat', 'madiran', 'châteauneuf', 'bordeaux', 'rioja', 'chianti', 'barolo'];
+
+  function detectCategory(text){
+    const t = normalize(text);
+    const groups = [
+      ['spiritueux', KW_SPIRIT], ['cuit', KW_CUIT], ['bulles', KW_BULLES],
+      ['rose', KW_ROSE], ['blanc', KW_BLANC], ['rouge', KW_ROUGE]
+    ];
+    for (const [key, list] of groups){
+      const hit = list.find(k => t.includes(normalize(k)));
+      if (hit) return { key, matched: hit };
+    }
+    return null;
+  }
+
+  function titleCase(s){
+    return s.split(' ').filter(Boolean).map(w => w[0].toUpperCase() + w.slice(1).toLowerCase()).join(' ');
+  }
+
+  function extractNameCandidate(rawText){
+    const lines = rawText.split('\n').map(l => l.trim()).filter(Boolean);
+    const candidates = lines.filter(l => {
+      if (l.length < 3 || l.length > 45) return false;
+      if (BOILERPLATE.some(re => re.test(l))) return false;
+      const letters = (l.match(/[A-Za-zÀ-ÿ]/g) || []).length;
+      return letters >= 3;
+    });
+    if (candidates.length === 0) return '';
+    let best = candidates.find(l => DOMAINE_WORDS.test(l));
+    if (!best) best = candidates.slice().sort((a, b) => b.length - a.length)[0];
+    return titleCase(best);
+  }
+
+  function detectYear(text){
+    const m = text.match(/\b(19|20)\d{2}\b/);
+    return m ? m[0] : '';
+  }
+
+  document.getElementById('photoCaptureInput').addEventListener('change', async function(e){
+    const file = e.target.files[0];
+    if (!file) return;
+
+    const feedback = document.getElementById('aiFeedback');
+    const submitBtn = document.getElementById('submitFormBtn');
+    feedback.innerHTML = `<span class="loader" style="width:11px;height:11px;display:inline-block;vertical-align:-1px;margin-right:6px"></span> Lecture de l'étiquette en cours…`;
+    submitBtn.disabled = true;
+    submitBtn.style.opacity = '0.5';
+
+    let worker = null;
+    let objectUrl = null;
+    try {
+      const img = await loadImageEl(file);
+      objectUrl = img.src;
+      document.getElementById('imageUrlInput').value = makeThumbnail(img);
+
+      const ocrCanvas = makeOcrCanvas(img);
+      worker = await Tesseract.createWorker('fra+eng');
+      const { data } = await worker.recognize(ocrCanvas);
+      const text = data.text || '';
+
+      const catInfo = detectCategory(text);
+      const nameCandidate = extractNameCandidate(text);
+      const year = detectYear(text);
+
+      if (nameCandidate) document.getElementById('nameInput').value = year ? `${nameCandidate} ${year}` : nameCandidate;
+      if (catInfo){
+        document.getElementById('catInput').value = catInfo.key;
+        document.getElementById('detailInput').value = titleCase(catInfo.matched);
+      }
+
+      if (catInfo && nameCandidate){
+        feedback.innerHTML = `<span style="color:#7fbf9c">✅ Étiquette lue : probablement un ${CAT_BY_KEY[catInfo.key].label.toLowerCase()}. Vérifiez le nom avant d'enregistrer.</span>`;
+      } else if (catInfo && !nameCandidate){
+        feedback.innerHTML = `<span style="color:#c9a15a">🔎 On dirait un ${CAT_BY_KEY[catInfo.key].label.toLowerCase()}, mais le nom n'est pas net — complétez-le.</span>`;
+      } else if (!catInfo && nameCandidate){
+        feedback.innerHTML = `<span style="color:#c9a15a">🔎 Nom probable détecté, mais la catégorie reste incertaine — choisissez-la.</span>`;
+      } else {
+        feedback.innerHTML = `<span style="color:#e08a97">⚠️ Photo pas assez nette pour une lecture fiable. Remplissez la fiche à la main, ou réessayez avec plus de lumière.</span>`;
+      }
+    } catch(err){
+      console.error(err);
+      feedback.innerHTML = `<span style="color:#e08a97">⚠️ Échec de la lecture optique. Remplissez la fiche manuellement.</span>`;
+    } finally {
+      if (worker) { try { await worker.terminate(); } catch(e){} }
+      if (objectUrl) { try { URL.revokeObjectURL(objectUrl); } catch(e){} }
+      submitBtn.disabled = false;
+      submitBtn.style.opacity = '1';
+    }
+  });
+
+  // ---------- Export / Import / Reset ----------
+  function exportData(){
+    const blob = new Blob([JSON.stringify(visibleBottles(), null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    const date = new Date().toISOString().slice(0, 10);
+    a.href = url; a.download = `ma-cave-sauvegarde-${date}.json`;
+    document.body.appendChild(a); a.click(); a.remove();
+    URL.revokeObjectURL(url);
+  }
+
+  function importData(file){
+    const reader = new FileReader();
+    reader.onload = async (e) => {
+      try {
+        const parsed = JSON.parse(e.target.result);
+        if (!Array.isArray(parsed) || !parsed.every(b => b && typeof b === 'object' && 'name' in b)){
+          throw new Error('format invalide');
+        }
+        if (!confirm(`Importer ${parsed.length} bouteille(s) ? Cela remplacera votre liste actuelle.`)) return;
+        const now = Date.now();
+        // On récupère d'abord la version distante pour être sûr de bien marquer
+        // comme supprimé tout ce qui existait (y compris côté partagé), sans quoi
+        // ces bouteilles réapparaîtraient à la prochaine synchronisation.
+        if (Drive.signedIn && Drive.fileId){
+          try {
+            const remote = await Drive.pull();
+            if (remote && Array.isArray(remote.bottles)) bottles = mergeBottles(bottles, remote.bottles);
+          } catch(err){}
+        }
+        const importedIds = new Set();
+        const imported = parsed.map(b => {
+          const id = b.id || Math.round(Date.now() + Math.random() * 1000);
+          importedIds.add(id);
+          return { ...b, id, updatedAt: now, deleted: false };
+        });
+        const tombstoned = bottles
+          .filter(b => !b.deleted && !importedIds.has(b.id))
+          .map(b => ({ ...b, deleted: true, updatedAt: now }));
+        bottles = [...imported, ...tombstoned];
+        await saveData();
+        renderApp();
+        closeHelpModal();
+        showToast('Import réussi');
+      } catch(err){
+        showToast('Fichier de sauvegarde invalide', 'error');
+      }
+    };
+    reader.readAsText(file);
+  }
+
+  async function resetData(){
+    if (!confirm('Supprimer toutes vos bouteilles ? Pensez à exporter une sauvegarde avant si besoin.')) return;
+    const now = Date.now();
+    if (Drive.signedIn && Drive.fileId){
+      try {
+        const remote = await Drive.pull();
+        if (remote && Array.isArray(remote.bottles)) bottles = mergeBottles(bottles, remote.bottles);
+      } catch(e){}
+    }
+    bottles = bottles.map(b => ({ ...b, deleted: true, updatedAt: now }));
+    await saveData();
+    renderApp();
+    closeHelpModal();
+    showToast('Cave réinitialisée');
+  }
+
+  boot();
+</script>
+</body>
+</html>
