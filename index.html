@@ -248,7 +248,18 @@
   // Tant que ce n'est pas fait, l'application continue de fonctionner normalement en local.
   const GOOGLE_CLIENT_ID = '713933478392-t48hq2ob74lfaf6ch9kacfm7pmc5glst.apps.googleusercontent.com';
   const GOOGLE_API_KEY = 'AIzaSyBooeTjckxK9i0xvv5gQSL4sRVa5PFr2wo';
-  const DRIVE_SCOPE = 'https://www.googleapis.com/auth/drive.file';
+  // IMPORTANT : la portée "drive.file" ne donne accès qu'aux fichiers CRÉÉS par
+  // l'appli, ou explicitement "ouverts" via le sélecteur Picker avec cette même
+  // portée. Un fichier simplement partagé (permissions Drive) sur un second
+  // compte n'est PAS automatiquement lisible avec "drive.file" tant qu'il n'a
+  // pas été "ouvert" par ce compte via le Picker — c'est la cause la plus
+  // probable du bug "le second profil ne voit pas les bouteilles". On utilise
+  // donc la portée complète "drive", qui permet un accès direct par ID de
+  // fichier dès qu'il est partagé, sans dépendre du bon fonctionnement du
+  // Picker. Après cette mise à jour, chaque compte doit se DÉCONNECTER puis se
+  // RECONNECTER une fois (bouton "Déconnecter" puis "Connecter Google Drive")
+  // pour valider le nouveau consentement.
+  const DRIVE_SCOPE = 'https://www.googleapis.com/auth/drive';
   const DRIVE_FILENAME = 'Ma Cave - données partagées.json';
   const DRIVE_CONFIGURED = GOOGLE_CLIENT_ID.indexOf('VOTRE_CLIENT_ID') === -1;
   const PICKER_CONFIGURED = GOOGLE_API_KEY.indexOf('VOTRE_CLE_API') === -1;
@@ -289,14 +300,29 @@
           this.tokenExpiry = Date.now() + (resp.expires_in * 1000) - 60000;
           resolve(resp);
         };
-        this.tokenClient.requestAccessToken({ prompt: interactive ? 'consent' : '' });
+        const overrideConfig = { prompt: interactive ? 'consent' : '' };
+        // Sur un navigateur où plusieurs comptes Google sont ouverts (typiquement
+        // deux personnes sur le même appareil), un renouvellement "silencieux"
+        // sans indication de compte peut échouer ou cibler le mauvais compte.
+        // On précise donc l'email déjà connu pour ce fichier/appareil.
+        if (this.email) overrideConfig.login_hint = this.email;
+        this.tokenClient.requestAccessToken(overrideConfig);
       });
     },
 
-    async ensureToken(){
+    // allowInteractive : si le renouvellement silencieux échoue et que cet appel
+    // vient d'un clic utilisateur (geste explicite), on retente avec une fenêtre
+    // de consentement visible plutôt que d'abandonner silencieusement.
+    async ensureToken(allowInteractive){
       if (this.accessToken && Date.now() < this.tokenExpiry) return true;
       try { await this.requestToken(false); return true; }
-      catch(e){ return false; }
+      catch(e){
+        if (allowInteractive){
+          try { await this.requestToken(true); return true; }
+          catch(e2){ return false; }
+        }
+        return false;
+      }
     },
 
     disconnect(){
@@ -329,7 +355,7 @@
     },
 
     async createFile(payload){
-      const metadata = { name: DRIVE_FILENAME };
+      const metadata = { name: DRIVE_FILENAME, mimeType: 'application/json' };
       const boundary = 'macave314159265';
       const body =
         `--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${JSON.stringify(metadata)}\r\n` +
@@ -364,7 +390,7 @@
     },
 
     async shareWithEmail(email){
-      const ok = await this.ensureToken();
+      const ok = await this.ensureToken(true);
       if (!ok || !this.fileId) return false;
       try {
         const res = await fetch(`https://www.googleapis.com/drive/v3/files/${this.fileId}/permissions?sendNotificationEmail=true`, {
@@ -460,50 +486,66 @@
     }
   }
 
-  // Sauvegarde locale immédiate, puis fusion fiable avec la version Drive
-  // (on retire toujours la dernière version distante avant d'écrire, pour ne
-  // jamais écraser une modification faite entre-temps par l'autre personne).
-  async function saveData(){
-    persistLocal();
-    if (Drive.signedIn && Drive.fileId){
-      try {
-        const remote = await Drive.pull();
-        const remoteList = (remote && Array.isArray(remote.bottles)) ? remote.bottles : [];
-        const merged = mergeBottles(bottles, remoteList);
-        bottles = merged;
-        persistLocal();
-        const ok = await Drive.push({ bottles: merged });
-        if (!ok) showToast('Google Drive indisponible — sauvegardé sur cet appareil', 'error');
-        renderApp();
-      } catch(e){
-        console.error(e);
-        showToast('Google Drive indisponible — sauvegardé sur cet appareil', 'error');
-      }
+  // ---------- Synchronisation Drive : locale d'abord, réseau en arrière-plan ----------
+  // Principe : on écrit TOUJOURS en local en premier (instantané), puis on
+  // lance la synchronisation Drive sans bloquer l'interface. Une seule
+  // synchronisation tourne à la fois ; si une autre est déjà en cours, on la
+  // reprogramme juste après au lieu d'en lancer une seconde en parallèle.
+  let syncInFlight = false;
+  let syncQueued = false;
+
+  function setSyncingIndicator(active){
+    const el = document.getElementById('storageIndicator');
+    if (!el) return;
+    if (active){
+      el.innerHTML = '<span class="loader" style="width:9px;height:9px;display:inline-block;vertical-align:-1px;margin-right:6px"></span> Synchronisation…';
+    } else {
+      updateStorageIndicator();
     }
   }
 
-  async function syncNow(manual){
-    if (!Drive.signedIn || !Drive.fileId){ updateStorageIndicator(); return; }
+  async function performDriveSync(opts){
+    opts = opts || {};
+    if (!Drive.signedIn || !Drive.fileId){ updateStorageIndicator(); return false; }
+    if (syncInFlight){ syncQueued = true; return false; }
+    syncInFlight = true;
+    setSyncingIndicator(true);
+    let success = false;
     try {
-      const ok = await Drive.ensureToken();
+      const ok = await Drive.ensureToken(!!opts.interactive);
       if (!ok){
-        if (manual) showToast('Reconnexion Google requise', 'error');
-        updateStorageIndicator();
-        return;
+        if (opts.notify) showToast('Reconnexion Google requise', 'error');
+      } else {
+        const remote = await Drive.pull();
+        const remoteList = (remote && Array.isArray(remote.bottles)) ? remote.bottles : [];
+        bottles = mergeBottles(bottles, remoteList);
+        persistLocal();
+        renderApp();
+        success = await Drive.push({ bottles });
+        if (!success && opts.notify) showToast('Google Drive indisponible — sauvegardé sur cet appareil', 'error');
+        else if (success && opts.notify) showToast('Cave synchronisée');
       }
-      const remote = await Drive.pull();
-      const remoteList = (remote && Array.isArray(remote.bottles)) ? remote.bottles : [];
-      const merged = mergeBottles(bottles, remoteList);
-      bottles = merged;
-      persistLocal();
-      renderApp();
-      await Drive.push({ bottles: merged });
-      if (manual) showToast('Cave synchronisée');
     } catch(e){
       console.error(e);
-      if (manual) showToast('Synchronisation impossible', 'error');
+      if (opts.notify) showToast('Synchronisation impossible', 'error');
+    } finally {
+      syncInFlight = false;
+      setSyncingIndicator(false);
+      if (syncQueued){ syncQueued = false; performDriveSync({ interactive:false, notify:false }); }
     }
-    updateStorageIndicator();
+    return success;
+  }
+
+  // Sauvegarde locale immédiate (l'interface répond tout de suite), la
+  // synchronisation Drive se fait ensuite en arrière-plan sans bloquer l'appli.
+  async function saveData(){
+    persistLocal();
+    renderApp();
+    performDriveSync({ interactive:false, notify:true }); // volontairement non "await"
+  }
+
+  async function syncNow(manual){
+    await performDriveSync({ interactive: !!manual, notify: !!manual });
   }
 
   async function connectDrive(){
@@ -555,7 +597,7 @@
   }
 
   async function createSharedCave(){
-    const ok = await Drive.ensureToken();
+    const ok = await Drive.ensureToken(true);
     if (!ok){ showToast('Connexion Google requise', 'error'); return; }
     try {
       const fileId = await Drive.createFile({ bottles });
@@ -586,14 +628,19 @@
     }
     const loaded = await loadPicker();
     if (!loaded){ showToast('Google Picker indisponible (vérifiez votre connexion)', 'error'); return; }
-    const ok = await Drive.ensureToken();
+    const ok = await Drive.ensureToken(true);
     if (!ok){ showToast('Connexion Google requise', 'error'); return; }
     const view = new google.picker.DocsView(google.picker.ViewId.DOCS)
+      .setIncludeFolders(false)
+      .setOwnedByMe(false)
+      .setMimeTypes('application/json');
+    const viewMine = new google.picker.DocsView(google.picker.ViewId.DOCS)
       .setIncludeFolders(false)
       .setMimeTypes('application/json');
     const picker = new google.picker.PickerBuilder()
       .setOAuthToken(Drive.accessToken)
       .setDeveloperKey(GOOGLE_API_KEY)
+      .addView(viewMine)
       .addView(view)
       .setCallback(async (data) => {
         if (data.action === google.picker.Action.PICKED){
@@ -615,6 +662,31 @@
     const ok = await Drive.shareWithEmail(email);
     if (ok){ showToast('Invitation envoyée à ' + email); input.value = ''; }
     else showToast('Partage impossible', 'error');
+  }
+
+  // Alternative fiable au Picker : coller directement le lien ou l'identifiant
+  // du fichier Drive partagé. Utile si le Picker ne l'affiche pas (onglet
+  // "Partagé avec moi" non consulté, fichier tout juste partagé, etc.).
+  async function joinSharedCaveManual(){
+    const input = document.getElementById('manualFileIdInput');
+    const raw = (input.value || '').trim();
+    if (!raw){ showToast('Collez un lien ou un identifiant Drive', 'error'); return; }
+    // Un lien Drive contient l'ID sous la forme /d/ID/ ou ?id=ID ; sinon on
+    // suppose que l'utilisateur a collé l'ID directement.
+    let fileId = raw;
+    const m = raw.match(/\/d\/([-\w]{10,})/) || raw.match(/[?&]id=([-\w]{10,})/);
+    if (m) fileId = m[1];
+
+    const ok = await Drive.ensureToken(true);
+    if (!ok){ showToast('Connexion Google requise', 'error'); return; }
+    const valid = await Drive.verifyFile(fileId);
+    if (!valid){ showToast('Fichier introuvable — vérifiez le lien ou que le fichier est bien partagé avec ce compte', 'error'); return; }
+
+    Drive.fileId = fileId;
+    localStorage.setItem('driveFileId', fileId);
+    input.value = '';
+    await syncNow(true);
+    renderHelpDriveSection();
   }
 
   function renderHelpDriveSection(){
@@ -650,6 +722,13 @@
         <div class="flex flex-col gap-2">
           <button onclick="createSharedCave()" class="w-full rounded-xl px-4 py-3 text-[14px] font-medium" style="background:var(--gold);color:var(--bg-950)">Créer une nouvelle cave partagée</button>
           <button onclick="joinSharedCave()" class="w-full rounded-xl px-4 py-3 text-[14px] font-medium" style="background:var(--bg-950);border:1px solid var(--line);color:var(--cream)">Rejoindre une cave qu'on m'a partagée</button>
+        </div>
+        <div class="mt-3 pt-3" style="border-top:1px solid var(--line)">
+          <p class="text-[11.5px] mb-1.5" style="color:var(--muted)">Le sélecteur ne trouve pas le fichier ? Collez son lien Drive (ou son identifiant) :</p>
+          <div class="flex gap-2">
+            <input type="text" id="manualFileIdInput" placeholder="Lien ou ID du fichier Drive" class="flex-1 rounded-xl px-3 py-2 text-[13px]" style="background:var(--bg-950);border:1px solid var(--line);color:var(--cream)">
+            <button onclick="joinSharedCaveManual()" class="rounded-xl px-3 py-2 text-[13px] font-medium" style="background:var(--bg-950);border:1px solid var(--line);color:var(--cream)">Rejoindre</button>
+          </div>
         </div>
       `;
       return;
@@ -862,7 +941,6 @@
     else if (b.status === 'Terminé') b.status = 'En stock';
     b.updatedAt = Date.now();
     await saveData();
-    renderApp();
   }
 
   async function deleteBottle(id){
@@ -872,7 +950,6 @@
     b.deleted = true;
     b.updatedAt = Date.now();
     await saveData();
-    renderApp();
     showToast('Bouteille supprimée');
   }
 
@@ -911,6 +988,8 @@
 
   async function handleFormSubmit(e){
     e.preventDefault();
+    const submitBtn = document.getElementById('submitFormBtn');
+    if (submitBtn.disabled) return; // évite un double-clic pendant l'enregistrement
     const id = document.getElementById('bottleId').value;
     const data = {
       id: id ? parseInt(id) : Date.now(),
@@ -925,16 +1004,26 @@
       updatedAt: Date.now()
     };
     if (!data.category){ showToast('Choisissez une catégorie', 'error'); return; }
+
+    // Bouton désactivé + loader dès le clic pour empêcher tout double-envoi
+    // pendant l'enregistrement (même si celui-ci est maintenant quasi instantané).
+    submitBtn.disabled = true;
+    submitBtn.innerHTML = '<span class="loader" style="width:12px;height:12px;display:inline-block;vertical-align:-1px;margin-right:6px"></span> Enregistrement…';
+
     if (id){
       const idx = bottles.findIndex(b => b.id === parseInt(id));
       if (idx > -1) bottles[idx] = data;
     } else {
       bottles.unshift(data);
     }
+    // Écriture locale immédiate ; la synchronisation Drive se poursuit en
+    // arrière-plan après la fermeture de la fenêtre (voir performDriveSync).
     await saveData();
     closeModal();
-    renderApp();
     showToast('Bouteille enregistrée');
+
+    submitBtn.disabled = false;
+    submitBtn.textContent = 'Enregistrer';
   }
 
   // ---------- OCR étiquette ----------
@@ -1061,7 +1150,12 @@ document.getElementById('photoCaptureInput').addEventListener('change', async fu
         "notes": "Courte note de dégustation. Propose un accord avec une cuisine semi-gastronomique simple. Si c'est un vin rouge, oriente vers des plats épicés. Si c'est un rhum/vin cuit, oriente vers un dessert fort en chocolat. Adapte tes suggestions pour qu'elles puissent se décliner facilement pour un enfant. IMPORTANT : Ne propose JAMAIS d'accords contenant des champignons."
       }`;
 
-      const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${geminiKey}`, {
+      // "gemini-1.5-flash" a été définitivement retiré par Google courant 2026
+      // (toute requête renvoie une erreur 404), d'où l'échec systématique.
+      // On utilise l'alias "gemini-flash-latest", maintenu à jour par Google
+      // pour toujours pointer vers le modèle flash courant.
+      const GEMINI_MODEL = 'gemini-flash-latest';
+      const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${geminiKey}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -1077,6 +1171,10 @@ document.getElementById('photoCaptureInput').addEventListener('change', async fu
 
       const data = await response.json();
       if (data.error) throw new Error(data.error.message);
+      if (!data.candidates || !data.candidates.length || !data.candidates[0].content){
+        const reason = data.promptFeedback && data.promptFeedback.blockReason ? ` (${data.promptFeedback.blockReason})` : '';
+        throw new Error('Réponse vide de l\'IA' + reason);
+      }
 
       const rawJson = data.candidates[0].content.parts[0].text;
       const parsed = JSON.parse(rawJson);
@@ -1091,7 +1189,8 @@ document.getElementById('photoCaptureInput').addEventListener('change', async fu
 
     } catch(err) {
       console.error(err);
-      feedback.innerHTML = `<span style="color:#e08a97">⚠️ Échec de l'analyse IA. Veuillez remplir la fiche manuellement.</span>`;
+      const detail = err && err.message ? esc(err.message) : '';
+      feedback.innerHTML = `<span style="color:#e08a97">⚠️ Échec de l'analyse IA${detail ? ' : ' + detail : ''}. Veuillez remplir la fiche manuellement.</span>`;
     } finally {
       submitBtn.disabled = false;
       submitBtn.style.opacity = '1';
@@ -1139,7 +1238,6 @@ document.getElementById('photoCaptureInput').addEventListener('change', async fu
           .map(b => ({ ...b, deleted: true, updatedAt: now }));
         bottles = [...imported, ...tombstoned];
         await saveData();
-        renderApp();
         closeHelpModal();
         showToast('Import réussi');
       } catch(err){
@@ -1160,7 +1258,6 @@ document.getElementById('photoCaptureInput').addEventListener('change', async fu
     }
     bottles = bottles.map(b => ({ ...b, deleted: true, updatedAt: now }));
     await saveData();
-    renderApp();
     closeHelpModal();
     showToast('Cave réinitialisée');
   }
