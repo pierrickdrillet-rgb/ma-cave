@@ -95,6 +95,7 @@
             <span>Lire l'étiquette (photo)</span>
           </label>
           <input type="file" id="photoCaptureInput" accept="image/*" capture="environment" class="w-full text-[12px] cursor-pointer" style="color:var(--muted)">
+          <button type="button" id="retryAiBtn" onclick="retryAiAnalysis()" class="hidden mt-2 text-[12px] px-3 py-1.5 rounded-full transition" style="border:1px solid var(--line);color:var(--gold)">🔄 Relancer l'analyse IA sur cette photo</button>
           <div id="aiFeedback" class="text-[11.5px] mt-2 leading-relaxed" style="color:var(--muted)">
             Prenez une photo nette de l'étiquette : le nom et la catégorie seront proposés automatiquement, à vérifier avant d'enregistrer.
           </div>
@@ -113,7 +114,7 @@
 
         <div>
           <label class="block text-[13px] font-medium mb-1" style="color:var(--muted)">Détail <span class="font-normal">(facultatif)</span></label>
-          <input type="text" id="detailInput" placeholder="Ex. cépage, appellation, millésime" class="w-full rounded-xl px-3 py-2.5 text-[14px]" style="background:var(--bg-950);border:1px solid var(--line);color:var(--cream)">
+          <textarea id="detailInput" rows="2" placeholder="Ex. cépage, appellation, millésime" class="w-full rounded-xl px-3 py-2.5 text-[14px] leading-relaxed" style="background:var(--bg-950);border:1px solid var(--line);color:var(--cream);resize:vertical"></textarea>
         </div>
 
         <div class="grid grid-cols-2 gap-3">
@@ -164,7 +165,7 @@
         <p id="dataSizeInfo" class="text-[12px] leading-relaxed" style="color:var(--muted)"></p>
         <div class="flex flex-col gap-2 mt-3">
           <button onclick="optimizeStoredImages()" class="w-full rounded-xl px-3 py-2 text-[13px] font-medium" style="background:var(--bg-900);border:1px solid var(--line);color:var(--cream)">Compresser les photos enregistrées</button>
-          <button onclick="reclassifyArrangedBottles()" class="w-full rounded-xl px-3 py-2 text-[13px] font-medium" style="background:var(--bg-900);border:1px solid var(--line);color:var(--cream)">Reclasser automatiquement les arrangés détectés</button>
+          <button onclick="reclassifyArrangedBottles()" class="w-full rounded-xl px-3 py-2 text-[13px] font-medium" style="background:var(--bg-900);border:1px solid var(--line);color:var(--cream)">Reclasser automatiquement les infusions & liqueurs détectées</button>
         </div>
       </div>
 
@@ -206,7 +207,7 @@
     { key:'bulles', label:'Bulles', color:'#e8c874', emoji:'🍾' },
     { key:'cuit', label:'Vin cuit / apéritif', color:'#b0703a', emoji:'🍯' },
     { key:'spiritueux', label:'Spiritueux', color:'#8a5a2b', emoji:'🥃' },
-    { key:'arrange', label:'Rhums & whiskies arrangés', color:'#c07a3e', emoji:'🫙' },
+    { key:'arrange', label:'Infusions, arrangés & liqueurs', color:'#c07a3e', emoji:'🫙' },
     { key:'sans_alcool', label:'Sans alcool', color:'#5a8a76', emoji:'🍹' },
   ];
   const CAT_BY_KEY = Object.fromEntries(CATEGORIES.map(c => [c.key, c]));
@@ -876,12 +877,43 @@
       const prompt = `Tu es un sommelier. Plat à accorder : "${lastPairingContext.dish}".
 Voici UNIQUEMENT les bouteilles réellement disponibles dans la cave :
 ${list}
-Choisis la ou les meilleures bouteilles parmi cette liste (jamais une bouteille absente de la liste).
-Réponds UNIQUEMENT en JSON strict, sans texte autour : {"reason":"une phrase courte expliquant le choix","picks":["nom exact de bouteille 1","nom exact de bouteille 2"]}`;
+Choisis jusqu'à 3 bouteilles parmi cette liste (jamais une bouteille absente de la liste), classées de la meilleure à la moins bonne pour ce plat.
+Réponds UNIQUEMENT en JSON strict, sans texte autour : {"reason":"une phrase courte expliquant le choix global","picks":["nom exact du meilleur choix","nom exact du 2e choix","nom exact du 3e choix"]}`;
       const parsed = await callGeminiJSON([{ text: prompt }]);
-      const picks = Array.isArray(parsed.picks) ? parsed.picks : [];
-      out.innerHTML = `<p style="color:var(--gold)">${esc(parsed.reason || '')}</p>` +
-        (picks.length ? `<p class="mt-1" style="color:var(--cream)">${picks.map(esc).join(' · ')}</p>` : '');
+      const rawPicks = Array.isArray(parsed.picks) ? parsed.picks.slice(0, 3) : [];
+
+      // On relie chaque nom renvoyé par l'IA à la bouteille réelle en stock,
+      // pour l'afficher sous forme de carte identifiable au premier coup
+      // d'œil (comme la liste ci-dessus), dans l'ordre de préférence de l'IA.
+      const seen = new Set();
+      const pickedBottles = [];
+      rawPicks.forEach(name => {
+        const norm = normalize(name);
+        const found = lastPairingContext.inStock.find(b => normalize(b.name) === norm) ||
+          lastPairingContext.inStock.find(b => normalize(b.name).includes(norm) || norm.includes(normalize(b.name)));
+        if (found && !seen.has(found.id)){ seen.add(found.id); pickedBottles.push(found); }
+      });
+
+      const rankIcons = ['🥇', '🥈', '🥉'];
+      let html = `<p style="color:var(--gold)">${esc(parsed.reason || '')}</p>`;
+      if (pickedBottles.length){
+        html += `<div class="flex flex-col gap-2 mt-2">` + pickedBottles.map((b, i) => {
+          const cat = CAT_BY_KEY[b.category];
+          return `<div class="flex items-center gap-2.5 rounded-lg px-3.5 py-2.5" style="background:var(--bg-950);border:1px solid var(--gold)">
+            <span class="text-[15px] shrink-0">${rankIcons[i] || '•'}</span>
+            <span class="shrink-0">${cat ? cat.emoji : '🍾'}</span>
+            <div class="min-w-0 flex-1">
+              <p class="text-[14px] font-medium truncate" style="color:var(--cream)">${esc(b.name)}</p>
+              <p class="text-[11.5px] truncate" style="color:var(--muted)">${esc(b.detail || (cat ? cat.label : ''))}</p>
+            </div>
+            <span class="text-[12px] shrink-0" style="color:var(--muted)">×${b.qty}</span>
+          </div>`;
+        }).join('') + `</div>`;
+      } else if (rawPicks.length){
+        // repli si l'IA a renvoyé des noms qu'on n'a pas réussi à relier avec certitude
+        html += `<p class="mt-1" style="color:var(--cream)">${rawPicks.map(esc).join(' · ')}</p>`;
+      }
+      out.innerHTML = html;
     } catch(e){
       console.error(e);
       out.innerHTML = `<span style="color:#e08a97">IA momentanément indisponible (${esc(e.message || 'erreur')}) — la suggestion ci-dessus reste valable.</span>`;
@@ -956,10 +988,8 @@ Réponds UNIQUEMENT en JSON strict, sans texte autour : {"reason":"une phrase co
             ${b.image ? `<img src="${b.image}" class="w-full h-full object-cover" alt="">` : cat.emoji}
           </div>
           <div class="flex-1 min-w-0">
-            <div class="flex items-baseline gap-2 flex-wrap">
-              <h3 class="font-serif-display text-[16px] font-semibold truncate" style="color:var(--cream)">${esc(b.name)}</h3>
-              ${b.detail ? `<span class="text-[12px] truncate" style="color:var(--muted)">${esc(b.detail)}</span>` : ''}
-            </div>
+            <h3 class="font-serif-display text-[16px] font-semibold truncate" style="color:var(--cream)">${esc(b.name)}</h3>
+            ${b.detail ? `<p class="text-[12px] mt-0.5 leading-relaxed line-clamp-2" style="color:var(--muted)">${esc(b.detail)}</p>` : ''}
             <div class="flex items-center gap-2 mt-1 flex-wrap">
               <span class="text-[11px] px-2 py-0.5 rounded-full" style="${statusStyle}">${b.status}</span>
               ${b.price ? `<span class="text-[11px]" style="color:var(--gold)">${esc(b.price)}</span>` : ''}
@@ -1033,6 +1063,7 @@ Réponds UNIQUEMENT en JSON strict, sans texte autour : {"reason":"une phrase co
       document.getElementById('bottleId').value = '';
       document.getElementById('imageUrlInput').value = '';
     }
+    updateRetryButtonVisibility();
   }
 
   function closeModal(){ document.getElementById('bottleModal').classList.add('hidden'); }
@@ -1083,11 +1114,12 @@ Réponds UNIQUEMENT en JSON strict, sans texte autour : {"reason":"une phrase co
   }
 
   // Détecte les bouteilles cataloguées en "Spiritueux" dont le nom ou le
-  // détail mentionne un arrangé/une infusion, et les bascule vers la
-  // nouvelle catégorie dédiée "Rhums & whiskies arrangés".
+  // détail évoque une infusion, un arrangé ou une liqueur/fruit à l'alcool
+  // (limoncello, cognac au citron, cerises à l'eau de vie, etc.), et les
+  // bascule vers la catégorie dédiée "Infusions, arrangés & liqueurs".
   async function reclassifyArrangedBottles(){
     const targets = bottles.filter(b => !b.deleted && b.category === 'spiritueux' &&
-      /arrang|infus/.test(normalize(`${b.name} ${b.detail || ''}`)));
+      /arrang|infus|limoncello|liqueur|eau de vie|a l eau de vie/.test(normalize(`${b.name} ${b.detail || ''}`)));
     if (!targets.length){ showToast('Aucun arrangé détecté automatiquement'); return; }
     if (!confirm(`Reclasser ${targets.length} bouteille(s) détectée(s) comme arrangée(s) ?`)) return;
     targets.forEach(b => { b.category = 'arrange'; b.updatedAt = Date.now(); });
@@ -1212,10 +1244,22 @@ Réponds UNIQUEMENT en JSON strict, sans texte autour : {"reason":"une phrase co
     throw lastErr;
   }
 
-document.getElementById('photoCaptureInput').addEventListener('change', async function(e){
-    const file = e.target.files[0];
-    if (!file) return;
+  const AI_LABEL_PROMPT = `Tu es un sommelier expert. Analyse cette étiquette de bouteille.
+Renvoie UNIQUEMENT un objet JSON valide avec cette structure exacte, sans aucun texte autour :
+{
+  "nom": "Nom du domaine et de la cuvée",
+  "categorie": "L'une de ces valeurs exactes : rouge, blanc, rose, bulles, cuit, spiritueux, arrange, sans_alcool",
+  "detail": "Appellation, cépage, millésime",
+  "prix": "Estimation du prix moyen en euros (ex: 15€ - 20€)",
+  "notes": "Courte note de dégustation. Propose un accord avec une cuisine semi-gastronomique simple. Si c'est un vin rouge, oriente vers des plats épicés. Si c'est un rhum/vin cuit, oriente vers un dessert fort en chocolat. Adapte tes suggestions pour qu'elles puissent se décliner facilement pour un enfant. IMPORTANT : Ne propose JAMAIS d'accords contenant des champignons."
+}
+Utilise "arrange" pour tout spiritueux infusé, aromatisé ou fruit macéré dans l'alcool : rhum ou whisky arrangé, limoncello, cognac au citron, cerises à l'eau de vie, liqueur artisanale, etc. — jamais pour un spiritueux classique.`;
 
+  // Analyse une image (grande, pour la précision de lecture) et remplit le
+  // formulaire. storeDataUrl, si fourni, remplace la miniature enregistrée
+  // (utilisé lors d'une nouvelle photo) ; laissé à null lors d'un simple
+  // nouvel essai sur une photo déjà enregistrée, pour ne pas l'écraser.
+  async function runAiAnalysis(analysisDataUrl, storeDataUrl){
     const feedback = document.getElementById('aiFeedback');
     const submitBtn = document.getElementById('submitFormBtn');
     feedback.innerHTML = `<span class="loader" style="width:11px;height:11px;display:inline-block;vertical-align:-1px;margin-right:6px"></span> Analyse de la bouteille par l'IA en cours…`;
@@ -1226,34 +1270,14 @@ document.getElementById('photoCaptureInput').addEventListener('change', async fu
       const geminiKey = localStorage.getItem('gemini_api_key');
       if (!geminiKey) {
         feedback.innerHTML = `<span style="color:#e08a97">⚠️ Clé IA manquante. Ajoutez-la dans les paramètres (icône 📄).</span>`;
-        submitBtn.disabled = false;
-        submitBtn.style.opacity = '1';
         return;
       }
-      const img = await loadImageEl(file);
-      // Deux versions distinctes :
-      // - une grande, envoyée à l'IA pour bien lire l'étiquette, jamais stockée ;
-      // - une petite, gardée dans la fiche (elle ne sert qu'à une icône ~48px),
-      //   ce qui réduit très fortement le poids de la sauvegarde (voir aide).
-      const analysisImage = makeThumbnail(img, 1024, 0.82);
-      const storedThumbnail = makeThumbnail(img, 220, 0.6);
-      document.getElementById('imageUrlInput').value = storedThumbnail;
+      if (storeDataUrl) document.getElementById('imageUrlInput').value = storeDataUrl;
+      updateRetryButtonVisibility();
 
-      const base64Content = analysisImage.split(',')[1];
-
-      const promptText = `Tu es un sommelier expert. Analyse cette étiquette de bouteille.
-      Renvoie UNIQUEMENT un objet JSON valide avec cette structure exacte, sans aucun texte autour :
-      {
-        "nom": "Nom du domaine et de la cuvée",
-        "categorie": "L'une de ces valeurs exactes : rouge, blanc, rose, bulles, cuit, spiritueux, arrange, sans_alcool",
-        "detail": "Appellation, cépage, millésime",
-        "prix": "Estimation du prix moyen en euros (ex: 15€ - 20€)",
-        "notes": "Courte note de dégustation. Propose un accord avec une cuisine semi-gastronomique simple. Si c'est un vin rouge, oriente vers des plats épicés. Si c'est un rhum/vin cuit, oriente vers un dessert fort en chocolat. Adapte tes suggestions pour qu'elles puissent se décliner facilement pour un enfant. IMPORTANT : Ne propose JAMAIS d'accords contenant des champignons."
-      }
-      Utilise "arrange" uniquement pour un rhum ou whisky arrangé / infusé (fruits, épices, vanille...), jamais pour un spiritueux classique.`;
-
+      const base64Content = analysisDataUrl.split(',')[1];
       const parsed = await callGeminiJSON([
-        { text: promptText },
+        { text: AI_LABEL_PROMPT },
         { inline_data: { mime_type: "image/jpeg", data: base64Content } }
       ]);
 
@@ -1268,11 +1292,40 @@ document.getElementById('photoCaptureInput').addEventListener('change', async fu
     } catch(err) {
       console.error(err);
       const detail = err && err.message ? esc(err.message) : '';
-      feedback.innerHTML = `<span style="color:#e08a97">⚠️ Échec de l'analyse IA${detail ? ' : ' + detail : ''}. Veuillez remplir la fiche manuellement.</span>`;
+      feedback.innerHTML = `<span style="color:#e08a97">⚠️ Échec de l'analyse IA${detail ? ' : ' + detail : ''}. Vous pouvez réessayer (bouton ci-dessus) ou remplir la fiche manuellement.</span>`;
     } finally {
       submitBtn.disabled = false;
       submitBtn.style.opacity = '1';
     }
+  }
+
+  function updateRetryButtonVisibility(){
+    const btn = document.getElementById('retryAiBtn');
+    if (!btn) return;
+    const has = !!(document.getElementById('imageUrlInput').value);
+    btn.classList.toggle('hidden', !has);
+  }
+
+  // Relance l'analyse à partir de la photo déjà enregistrée sur la fiche —
+  // utile quand l'IA avait échoué (surcharge, clé absente à l'époque, etc.)
+  // sans avoir besoin de reprendre une photo de la bouteille.
+  async function retryAiAnalysis(){
+    const stored = document.getElementById('imageUrlInput').value;
+    if (!stored){ showToast('Aucune photo enregistrée pour cette bouteille', 'error'); return; }
+    await runAiAnalysis(stored, null);
+  }
+
+  document.getElementById('photoCaptureInput').addEventListener('change', async function(e){
+    const file = e.target.files[0];
+    if (!file) return;
+    const img = await loadImageEl(file);
+    // Deux versions distinctes :
+    // - une grande, envoyée à l'IA pour bien lire l'étiquette, jamais stockée ;
+    // - une petite, gardée dans la fiche (elle ne sert qu'à une icône ~48px),
+    //   ce qui réduit très fortement le poids de la sauvegarde (voir aide).
+    const analysisImage = makeThumbnail(img, 1024, 0.82);
+    const storedThumbnail = makeThumbnail(img, 220, 0.6);
+    await runAiAnalysis(analysisImage, storedThumbnail);
   });
   
   // ---------- Export / Import / Reset ----------
