@@ -258,31 +258,8 @@
   // ====================================================================
   // Synchronisation Google Drive — partagée entre deux comptes Google
   // ====================================================================
-  // Pour activer la synchronisation partagée :
-  //  1. Créez un identifiant OAuth gratuit sur https://console.cloud.google.com/apis/credentials
-  //     (type "ID client OAuth" > "Application Web") et ajoutez comme "Origine JavaScript
-  //     autorisée" l'adresse https où vous hébergez CETTE page (Google refuse file://).
-  //  2. Dans "Écran de consentement OAuth", statut "Test" : ajoutez VOTRE email ET celui de
-  //     votre conjointe comme "utilisateurs test" (obligatoire pour que les deux comptes
-  //     puissent se connecter tant que l'appli n'est pas publiée officiellement).
-  //  3. Activez l'API "Google Picker" (console > APIs & Services > Bibliothèque), puis créez
-  //     une "Clé API" (Identifiants > Créer des identifiants > Clé API), et restreignez-la à
-  //     l'API Picker + à votre domaine https pour la sécurité.
-  //  4. Collez votre Client ID et votre clé API ci-dessous.
-  // Tant que ce n'est pas fait, l'application continue de fonctionner normalement en local.
   const GOOGLE_CLIENT_ID = '713933478392-t48hq2ob74lfaf6ch9kacfm7pmc5glst.apps.googleusercontent.com';
   const GOOGLE_API_KEY = 'AIzaSyBooeTjckxK9i0xvv5gQSL4sRVa5PFr2wo';
-  // IMPORTANT : la portée "drive.file" ne donne accès qu'aux fichiers CRÉÉS par
-  // l'appli, ou explicitement "ouverts" via le sélecteur Picker avec cette même
-  // portée. Un fichier simplement partagé (permissions Drive) sur un second
-  // compte n'est PAS automatiquement lisible avec "drive.file" tant qu'il n'a
-  // pas été "ouvert" par ce compte via le Picker — c'est la cause la plus
-  // probable du bug "le second profil ne voit pas les bouteilles". On utilise
-  // donc la portée complète "drive", qui permet un accès direct par ID de
-  // fichier dès qu'il est partagé, sans dépendre du bon fonctionnement du
-  // Picker. Après cette mise à jour, chaque compte doit se DÉCONNECTER puis se
-  // RECONNECTER une fois (bouton "Déconnecter" puis "Connecter Google Drive")
-  // pour valider le nouveau consentement.
   const DRIVE_SCOPE = 'https://www.googleapis.com/auth/drive';
   const DRIVE_FILENAME = 'Ma Cave - données partagées.json';
   const DRIVE_CONFIGURED = GOOGLE_CLIENT_ID.indexOf('VOTRE_CLIENT_ID') === -1;
@@ -325,18 +302,11 @@
           resolve(resp);
         };
         const overrideConfig = { prompt: interactive ? 'consent' : '' };
-        // Sur un navigateur où plusieurs comptes Google sont ouverts (typiquement
-        // deux personnes sur le même appareil), un renouvellement "silencieux"
-        // sans indication de compte peut échouer ou cibler le mauvais compte.
-        // On précise donc l'email déjà connu pour ce fichier/appareil.
         if (this.email) overrideConfig.login_hint = this.email;
         this.tokenClient.requestAccessToken(overrideConfig);
       });
     },
 
-    // allowInteractive : si le renouvellement silencieux échoue et que cet appel
-    // vient d'un clic utilisateur (geste explicite), on retente avec une fenêtre
-    // de consentement visible plutôt que d'abandonner silencieusement.
     async ensureToken(allowInteractive){
       if (this.accessToken && Date.now() < this.tokenExpiry) return true;
       try { await this.requestToken(false); return true; }
@@ -427,11 +397,6 @@
     }
   };
 
-  // ---------- Fusion fiable multi-appareils / multi-comptes ----------
-  // Chaque bouteille porte un "updatedAt". Les suppressions posent une marque
-  // (tombstone) au lieu d'effacer la ligne, pour ne jamais faire réapparaître
-  // une bouteille supprimée par l'autre personne suite à une fusion. Les
-  // tombstones trop anciennes (>180 jours) sont purgées automatiquement.
   const TOMBSTONE_TTL_MS = 1000 * 60 * 60 * 24 * 180;
 
   function mergeBottles(localList, remoteList){
@@ -510,11 +475,6 @@
     }
   }
 
-  // ---------- Synchronisation Drive : locale d'abord, réseau en arrière-plan ----------
-  // Principe : on écrit TOUJOURS en local en premier (instantané), puis on
-  // lance la synchronisation Drive sans bloquer l'interface. Une seule
-  // synchronisation tourne à la fois ; si une autre est déjà en cours, on la
-  // reprogramme juste après au lieu d'en lancer une seconde en parallèle.
   let syncInFlight = false;
   let syncQueued = false;
 
@@ -560,12 +520,10 @@
     return success;
   }
 
-  // Sauvegarde locale immédiate (l'interface répond tout de suite), la
-  // synchronisation Drive se fait ensuite en arrière-plan sans bloquer l'appli.
   async function saveData(){
     persistLocal();
     renderApp();
-    performDriveSync({ interactive:false, notify:true }); // volontairement non "await"
+    performDriveSync({ interactive:false, notify:true });
   }
 
   async function syncNow(manual){
@@ -688,15 +646,10 @@
     else showToast('Partage impossible', 'error');
   }
 
-  // Alternative fiable au Picker : coller directement le lien ou l'identifiant
-  // du fichier Drive partagé. Utile si le Picker ne l'affiche pas (onglet
-  // "Partagé avec moi" non consulté, fichier tout juste partagé, etc.).
   async function joinSharedCaveManual(){
     const input = document.getElementById('manualFileIdInput');
     const raw = (input.value || '').trim();
     if (!raw){ showToast('Collez un lien ou un identifiant Drive', 'error'); return; }
-    // Un lien Drive contient l'ID sous la forme /d/ID/ ou ?id=ID ; sinon on
-    // suppose que l'utilisateur a collé l'ID directement.
     let fileId = raw;
     const m = raw.match(/\/d\/([-\w]{10,})/) || raw.match(/[?&]id=([-\w]{10,})/);
     if (m) fileId = m[1];
@@ -797,7 +750,6 @@
 
   let lastPairingContext = null;
 
-  // ---------- Sommelier ----------
   function suggestPairing(){
     const raw = document.getElementById('dishInput').value;
     const input = normalize(raw);
@@ -859,11 +811,6 @@
       html += `<p class="text-[13px]" style="color:var(--muted)">Votre cave est vide pour l'instant — ajoutez quelques bouteilles pour recevoir des suggestions.</p>`;
     }
 
-    // Cette suggestion (ci-dessus) est calculée localement par des règles, donc
-    // toujours disponible instantanément, même hors ligne ou si l'IA est
-    // surchargée. On propose en plus, optionnellement, un avis affiné par
-    // l'IA à partir des bouteilles réellement en stock — sans jamais remplacer
-    // ni bloquer la suggestion fiable déjà affichée.
     if (localStorage.getItem('gemini_api_key') && inStock.length > 0){
       html += `<div class="mt-3 pt-3" style="border-top:1px solid var(--line)">
         <button type="button" onclick="refineWithAI()" id="aiPairingBtn" class="text-[12.5px] px-3 py-1.5 rounded-full transition" style="border:1px solid var(--line);color:var(--gold)">🍷 Affiner avec l'IA</button>
@@ -883,8 +830,6 @@
     btn.innerHTML = '<span class="loader" style="width:10px;height:10px;display:inline-block;vertical-align:-1px;margin-right:6px"></span> Réflexion…';
     out.textContent = '';
     try {
-      // On ignore les bouteilles tombées à 0 entre-temps (ex. marquées "servie"
-      // juste avant un second clic sur "Affiner").
       const available = lastPairingContext.inStock.filter(b => (b.qty || 0) > 0);
       if (!available.length){
         out.innerHTML = `<span style="color:var(--muted)">Plus aucune bouteille disponible pour ce plat dans votre cave.</span>`;
@@ -901,12 +846,9 @@ Choisis jusqu'à 3 bouteilles parmi cette liste (jamais une bouteille absente de
 Sois honnête : si aucune de ces bouteilles ne fait un VRAI bon accord avec ce plat (juste un pis-aller acceptable), dis-le clairement.
 Réponds UNIQUEMENT en JSON strict, sans texte autour :
 {"reason":"une phrase courte expliquant le choix global","picks":["nom exact du meilleur choix","nom exact du 2e choix","nom exact du 3e choix"],"goodMatch":true ou false selon qu'un accord vraiment réussi est possible avec ce qui est disponible,"shoppingSuggestion":"si goodMatch est false, décris en une phrase le type de bouteille idéal à acheter pour un accord parfait (cépage/appellation/style de vin ou de spiritueux, pas une marque précise) ; sinon chaîne vide"}`;
-      const parsed = await withTimeout(callGeminiJSON([{ text: prompt }]), 25000, "L'IA met trop de temps à répondre");
+      const parsed = await withTimeout(callGeminiJSON([{ text: prompt }]), 40000, "L'IA met trop de temps à répondre");
       const rawPicks = Array.isArray(parsed.picks) ? parsed.picks.slice(0, 3) : [];
 
-      // On relie chaque nom renvoyé par l'IA à la bouteille réelle en stock,
-      // pour l'afficher sous forme de carte identifiable au premier coup
-      // d'œil (comme la liste ci-dessus), dans l'ordre de préférence de l'IA.
       const seen = new Set();
       const pickedBottles = [];
       rawPicks.forEach(name => {
@@ -932,12 +874,9 @@ Réponds UNIQUEMENT en JSON strict, sans texte autour :
           </div>`;
         }).join('') + `</div>`;
       } else if (rawPicks.length){
-        // repli si l'IA a renvoyé des noms qu'on n'a pas réussi à relier avec certitude
         html += `<p class="mt-1" style="color:var(--cream)">${rawPicks.map(esc).join(' · ')}</p>`;
       }
 
-      // Verdict honnête : si rien ne fait vraiment un bon accord, on le dit
-      // clairement et on suggère quoi acheter pour un accompagnement parfait.
       if (parsed.goodMatch === false && parsed.shoppingSuggestion){
         html += `<div class="mt-3 pt-3" style="border-top:1px dashed var(--line)">
           <p class="text-[12.5px] leading-relaxed" style="color:var(--muted)">🛒 <strong style="color:var(--gold)">Aucun accord vraiment idéal en stock.</strong> Pour un accompagnement parfait, pensez à ajouter à votre cave : ${esc(parsed.shoppingSuggestion)}</p>
@@ -954,15 +893,11 @@ Réponds UNIQUEMENT en JSON strict, sans texte autour :
     }
   }
 
-  // Marque une bouteille comme servie directement depuis une carte de
-  // suggestion (locale ou IA) : retire une unité du stock sans avoir à
-  // rouvrir la fiche de la bouteille.
 async function markBottleUsedFromSuggestion(id, btnEl){
   const b = bottles.find(x => x.id === id);
   if (!b){ if (btnEl){ btnEl.disabled = true; btnEl.textContent = '—'; } return; }
   if ((b.qty || 0) <= 0){ showToast('Déjà à 0 en stock', 'error'); return; }
 
-  // Sécurité anti-missclick : demande de confirmation
   if (!confirm(`Confirmez-vous le retrait d'une bouteille de " ${b.name} " de votre cave ?`)) return;
 
   if (btnEl){ btnEl.disabled = true; btnEl.textContent = '…'; }
@@ -974,7 +909,6 @@ async function markBottleUsedFromSuggestion(id, btnEl){
     }
   }
 
-  // ---------- Rendu principal ----------
   function renderApp(){
     const search = normalize(document.getElementById('searchInput').value);
     const list = document.getElementById('inventoryList');
@@ -1092,7 +1026,6 @@ async function markBottleUsedFromSuggestion(id, btnEl){
     showToast('Bouteille supprimée');
   }
 
-  // ---------- Modal ajout/édition ----------
   function openModal(id){
     document.getElementById('bottleModal').classList.remove('hidden');
     document.getElementById('photoCaptureInput').value = '';
@@ -1127,7 +1060,6 @@ async function markBottleUsedFromSuggestion(id, btnEl){
   function openHelpModal(){ renderHelpDriveSection(); updateDataSizeInfo(); document.getElementById('helpModal').classList.remove('hidden'); }
   function closeHelpModal(){ document.getElementById('helpModal').classList.add('hidden'); }
 
-  // ---------- Volume des données ----------
   function updateDataSizeInfo(){
     const el = document.getElementById('dataSizeInfo');
     if (!el) return;
@@ -1145,10 +1077,6 @@ async function markBottleUsedFromSuggestion(id, btnEl){
     el.textContent = msg;
   }
 
-  // Recompresse en place les photos déjà enregistrées en haute résolution
-  // (ancien format ~40-90 Ko/photo) vers le format léger utilisé désormais
-  // pour l'affichage (~5-10 Ko/photo), ce qui réduit fortement le poids total
-  // de la sauvegarde et accélère chaque synchronisation Drive.
   async function optimizeStoredImages(){
     const targets = bottles.filter(b => !b.deleted && b.image && b.image.length > 20000);
     if (!targets.length){ showToast('Aucune photo à compresser'); return; }
@@ -1168,10 +1096,6 @@ async function markBottleUsedFromSuggestion(id, btnEl){
     showToast(`${done} photo(s) compressée(s)`);
   }
 
-  // Détecte les bouteilles cataloguées en "Spiritueux" dont le nom ou le
-  // détail évoque une infusion, un arrangé ou une liqueur/fruit à l'alcool
-  // (limoncello, cognac au citron, cerises à l'eau de vie, etc.), et les
-  // bascule vers la catégorie dédiée "Infusions, arrangés & liqueurs".
   async function reclassifyArrangedBottles(){
     const targets = bottles.filter(b => !b.deleted && b.category === 'spiritueux' &&
       /arrang|infus|limoncello|liqueur|eau de vie|a l eau de vie/.test(normalize(`${b.name} ${b.detail || ''}`)));
@@ -1185,7 +1109,7 @@ async function markBottleUsedFromSuggestion(id, btnEl){
   async function handleFormSubmit(e){
     e.preventDefault();
     const submitBtn = document.getElementById('submitFormBtn');
-    if (submitBtn.disabled) return; // évite un double-clic pendant l'enregistrement
+    if (submitBtn.disabled) return;
     const id = document.getElementById('bottleId').value;
     const data = {
       id: id ? parseInt(id) : Date.now(),
@@ -1202,8 +1126,6 @@ async function markBottleUsedFromSuggestion(id, btnEl){
     };
     if (!data.category){ showToast('Choisissez une catégorie', 'error'); return; }
 
-    // Bouton désactivé + loader dès le clic pour empêcher tout double-envoi
-    // pendant l'enregistrement (même si celui-ci est maintenant quasi instantané).
     submitBtn.disabled = true;
     submitBtn.innerHTML = '<span class="loader" style="width:12px;height:12px;display:inline-block;vertical-align:-1px;margin-right:6px"></span> Enregistrement…';
 
@@ -1213,8 +1135,6 @@ async function markBottleUsedFromSuggestion(id, btnEl){
     } else {
       bottles.unshift(data);
     }
-    // Écriture locale immédiate ; la synchronisation Drive se poursuit en
-    // arrière-plan après la fermeture de la fenêtre (voir performDriveSync).
     await saveData();
     closeModal();
     showToast('Bouteille enregistrée');
@@ -1223,7 +1143,6 @@ async function markBottleUsedFromSuggestion(id, btnEl){
     submitBtn.textContent = 'Enregistrer';
   }
 
-  // ---------- OCR étiquette ----------
   function loadImageEl(file){
     return new Promise((resolve, reject) => {
       const img = new Image();
@@ -1254,66 +1173,185 @@ async function markBottleUsedFromSuggestion(id, btnEl){
     });
   }
 
-  // ---------- Appel IA (Gemini) fiabilisé ----------
-  // "gemini-1.5-flash" a été définitivement retiré par Google courant 2026
-  // (404 systématique). Les modèles "preview" (dont pointe parfois l'alias
-  // "gemini-flash-latest") peuvent renvoyer une erreur 503 "high demand" en
-  // cas de forte affluence côté Google. On essaie donc plusieurs modèles dans
-  // l'ordre, avec un court réessai sur chacun en cas de surcharge (503/429),
-  // avant d'abandonner. gemini-3.6-flash est la version stable courante.
-  const GEMINI_MODEL_CANDIDATES = ['gemini-3.6-flash',  'gemini-3.6-flash-latest', 'gemini-3.6-flash-8b'];
+  // ==========================================================================
+  // Appel IA (Gemini) — fiabilisé
+  // ==========================================================================
+  // Trois causes distinctes expliquaient la plupart des échecs observés :
+  //
+  //  1) Modèles obsolètes : Google retire ou renomme ses modèles Gemini tous
+  //     les 1-2 mois (ça a été le cas de gemini-1.5-*, gemini-2.0-*, et
+  //     gemini-2.5-pro est retiré à son tour le 16/10/2026). Une liste de
+  //     noms figée en dur finit toujours par pointer vers un modèle qui
+  //     n'existe plus, avec une erreur 404 systématique. On interroge donc
+  //     désormais l'API Gemini elle-même (GET /v1beta/models) pour obtenir
+  //     les modèles réellement disponibles pour CETTE clé, et on choisit
+  //     automatiquement les meilleurs candidats "flash" — la liste ci-dessous
+  //     ne sert plus que de secours si cet appel échoue (hors-ligne, etc.).
+  //  2) Latence de réflexion : les modèles Gemini 3.x "réfléchissent"
+  //     (thinking) avant de répondre, ce qui peut prendre largement plus de
+  //     20 secondes par défaut — au-delà du délai d'attente de l'appli, ce
+  //     qui ressemblait à une panne alors que la requête était simplement
+  //     encore en cours. Pour une tâche d'extraction simple comme la nôtre,
+  //     on demande maintenant explicitement un niveau de réflexion minimal.
+  //  3) Erreurs mal triées : une clé invalide (401/403) ou une requête
+  //     refusée (400) échoueront toujours de la même façon, retenter ne sert
+  //     à rien ; un modèle introuvable (404) doit faire passer au suivant
+  //     immédiatement ; seule une vraie surcharge temporaire (429/503)
+  //     justifie un nouvel essai. Le code précédent traitait presque tout
+  //     comme transitoire, ce qui gaspillait le temps disponible à retenter
+  //     des erreurs qui ne pouvaient de toute façon pas réussir.
+  const GEMINI_FALLBACK_MODELS = ['gemini-3.6-flash', 'gemini-3.5-flash-lite', 'gemini-3.1-flash-lite'];
+  const GEMINI_MODEL_CACHE_KEY = 'gemini_model_candidates_cache_v1';
+  const GEMINI_MODEL_CACHE_TTL = 24 * 60 * 60 * 1000; // 24h : la gamme de modèles ne change pas d'une minute à l'autre
 
-  // Marque une erreur comme définitive (clé invalide, contenu refusé...) :
-  // inutile de la retenter sur ce modèle ni les suivants.
-  class NonRetryableAIError extends Error {}
+  class NonRetryableAIError extends Error {}   // clé invalide, requête refusée, contenu bloqué… retenter ne changera rien
+  class ModelUnavailableError extends Error {} // 404 : ce modèle précis n'existe plus, on passe au suivant sans délai
 
+  // Interroge la liste réelle des modèles disponibles pour cette clé et
+  // sélectionne les meilleurs candidats "flash" (rapides et multimodaux),
+  // du plus récent/complet au plus léger. Résultat mis en cache 24h pour ne
+  // pas ralentir chaque analyse d'étiquette avec un aller-retour réseau en plus.
+  async function getGeminiModelCandidates(apiKey){
+    try {
+      const cachedRaw = localStorage.getItem(GEMINI_MODEL_CACHE_KEY);
+      if (cachedRaw){
+        const cached = JSON.parse(cachedRaw);
+        if (cached.key === apiKey && Array.isArray(cached.models) && cached.models.length &&
+            (Date.now() - cached.at) < GEMINI_MODEL_CACHE_TTL){
+          return cached.models;
+        }
+      }
+    } catch(e){}
+
+    try {
+      const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey}&pageSize=200`);
+      if (!res.ok) throw new Error('liste de modèles indisponible');
+      const data = await res.json();
+      const all = Array.isArray(data.models) ? data.models : [];
+      const versionOf = (name) => { const m = name.match(/gemini-(\d+(?:\.\d+)?)/); return m ? parseFloat(m[1]) : 0; };
+      const isLite = (name) => /lite/i.test(name);
+      const isPreviewish = (name) => /preview|exp(?:erimental)?/i.test(name);
+
+      const candidates = all
+        .filter(m => Array.isArray(m.supportedGenerationMethods) && m.supportedGenerationMethods.includes('generateContent'))
+        .map(m => (m.name || '').replace(/^models\//, ''))
+        .filter(name => /flash/i.test(name) && !/embedding|tts|live|image-generation|robotics|aqa|native-audio/i.test(name))
+        .sort((a, b) => {
+          const liteDiff = (isLite(a) ? 1 : 0) - (isLite(b) ? 1 : 0); // non-lite d'abord (plus fiable pour la lecture d'étiquette)
+          if (liteDiff !== 0) return liteDiff;
+          const vDiff = versionOf(b) - versionOf(a); // version la plus récente d'abord
+          if (vDiff !== 0) return vDiff;
+          return (isPreviewish(a) ? 1 : 0) - (isPreviewish(b) ? 1 : 0); // stable avant preview/expérimental
+        });
+
+      const top = [...new Set(candidates)].slice(0, 3);
+      if (top.length){
+        localStorage.setItem(GEMINI_MODEL_CACHE_KEY, JSON.stringify({ key: apiKey, at: Date.now(), models: top }));
+        return top;
+      }
+    } catch(e){
+      console.error('Liste de modèles Gemini indisponible, utilisation de la liste de secours', e);
+    }
+    return GEMINI_FALLBACK_MODELS;
+  }
+
+  // Niveau de réflexion adapté à une simple extraction structurée : minimal
+  // sur les modèles Gemini 3.x ("thinkingLevel"), désactivé sur d'éventuels
+  // modèles 2.5 encore accessibles ("thinkingBudget": 0). Envoyer les deux
+  // réglages à la fois provoque une erreur 400, d'où la distinction.
+  function thinkingConfigFor(modelName){
+    if (/gemini-3/i.test(modelName)) return { thinkingLevel: 'low' };
+    return { thinkingBudget: 0 };
+  }
+
+  // Un seul essai sur un seul modèle, borné dans le temps par un
+  // AbortController (plutôt qu'un timeout global qui grignoterait le budget
+  // des autres modèles si celui-ci traîne). Classe chaque échec correctement
+  // pour que l'appelant sache s'il doit retenter, passer au suivant, ou abandonner.
+  async function callOneGeminiModel(model, parts, apiKey, timeoutMs){
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        signal: controller.signal,
+        body: JSON.stringify({
+          contents: [{ parts }],
+          generationConfig: {
+            response_mime_type: 'application/json',
+            maxOutputTokens: 2048,
+            thinkingConfig: thinkingConfigFor(model)
+          }
+        })
+      });
+
+      let data;
+      try { data = await response.json(); }
+      catch(e){ throw new Error('Réponse invalide du serveur IA'); }
+
+      if (!response.ok || data.error){
+        const code = (data.error && data.error.code) || response.status;
+        const message = (data.error && data.error.message) || `Erreur HTTP ${response.status}`;
+        if (code === 404) throw new ModelUnavailableError(message);
+        if (code === 401 || code === 403) throw new NonRetryableAIError('Clé IA invalide ou refusée : ' + message);
+        if (code === 400) throw new NonRetryableAIError(message);
+        throw new Error(message); // 429 / 503 / autres : potentiellement transitoire, on retentera
+      }
+
+      const candidate = data.candidates && data.candidates[0];
+      if (!candidate || !candidate.content || !candidate.content.parts || !candidate.content.parts.length){
+        const blockReason = data.promptFeedback && data.promptFeedback.blockReason;
+        if (blockReason) throw new NonRetryableAIError('Contenu refusé par le filtre de sécurité (' + blockReason + ')');
+        if (candidate && candidate.finishReason === 'SAFETY') throw new NonRetryableAIError('Contenu refusé par le filtre de sécurité');
+        throw new Error("Réponse vide de l'IA");
+      }
+      if (candidate.finishReason === 'MAX_TOKENS'){
+        throw new Error('Réponse tronquée (limite de tokens atteinte)');
+      }
+
+      // response_mime_type:'application/json' évite en principe les
+      // blocs ```json, mais on les retire quand même par sécurité.
+      let text = candidate.content.parts.map(p => p.text || '').join('').trim();
+      text = text.replace(/^```json\s*/i, '').replace(/^```\s*/, '').replace(/```\s*$/, '').trim();
+      try { return JSON.parse(text); }
+      catch(e){ throw new Error("Réponse IA mal formée (JSON invalide)"); }
+    } catch(e){
+      if (e.name === 'AbortError') throw new Error('Délai dépassé pour ce modèle');
+      throw e;
+    } finally {
+      clearTimeout(timeoutId);
+    }
+  }
+
+  // Essaie chaque modèle candidat l'un après l'autre (rapide, sans délai
+  // d'attente inutile). Si tous ont échoué pour une raison transitoire
+  // (surcharge, timeout…), fait un second passage complet avec un court
+  // délai avant chaque essai. Une erreur "non retryable" (clé invalide,
+  // contenu refusé…) interrompt tout immédiatement, car réessayer
+  // produirait exactement la même erreur.
   async function callGeminiJSON(parts){
     const geminiKey = localStorage.getItem('gemini_api_key');
     if (!geminiKey) throw new Error('Clé IA manquante');
+
+    const models = await getGeminiModelCandidates(geminiKey);
     let lastErr = new Error('IA indisponible');
-    for (const model of GEMINI_MODEL_CANDIDATES){
-      for (let attempt = 0; attempt < 2; attempt++){
+
+    for (let pass = 0; pass < 2; pass++){
+      for (const model of models){
         try {
-          const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${geminiKey}`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              contents: [{ parts }],
-              generationConfig: { response_mime_type: 'application/json' }
-            })
-          });
-          const data = await response.json();
-          if (data.error){
-            const overloaded = data.error.code === 503 || data.error.code === 429 ||
-              data.error.status === 'UNAVAILABLE' || data.error.status === 'RESOURCE_EXHAUSTED';
-            if (overloaded){
-              lastErr = new Error(data.error.message);
-              await new Promise(r => setTimeout(r, 800 + attempt * 700));
-              continue;
-            }
-            // Erreur définitive (clé invalide, requête refusée...) : elle se
-            // reproduirait à l'identique sur chaque tentative, inutile
-            // d'insister et de faire attendre l'utilisateur pour rien.
-            throw new NonRetryableAIError(data.error.message);
-          }
-          if (!data.candidates || !data.candidates.length || !data.candidates[0].content){
-            const reason = data.promptFeedback && data.promptFeedback.blockReason ? ` (${data.promptFeedback.blockReason})` : '';
-            throw new Error("Réponse vide de l'IA" + reason);
-          }
-          return JSON.parse(data.candidates[0].content.parts[0].text);
+          return await callOneGeminiModel(model, parts, geminiKey, 10000);
         } catch(e){
-          if (e instanceof NonRetryableAIError) throw e; // abandon immédiat, aucun réessai
+          if (e instanceof NonRetryableAIError) throw e;
           lastErr = e;
+          if (e instanceof ModelUnavailableError) continue; // ce modèle n'existe pas/plus : suivant sans délai
+          if (pass > 0) await new Promise(r => setTimeout(r, 600));
         }
       }
-      // On passe au modèle suivant après 2 essais infructueux sur celui-ci.
     }
     throw lastErr;
   }
 
-  // Garde-fou : quoi qu'il arrive (réseau qui traîne, requête qui ne répond
-  // jamais...), on rend la main à l'interface au bout d'un délai maximal
-  // plutôt que de laisser un bouton ou un formulaire bloqué indéfiniment.
   function withTimeout(promise, ms, message){
     return Promise.race([
       promise,
@@ -1333,10 +1371,6 @@ Renvoie UNIQUEMENT un objet JSON valide avec cette structure exacte, sans aucun 
 }
 Utilise "arrange" pour tout spiritueux infusé, aromatisé ou fruit macéré dans l'alcool : rhum ou whisky arrangé, limoncello, cognac au citron, cerises à l'eau de vie, liqueur artisanale, etc. — jamais pour un spiritueux classique.`;
 
-  // Analyse une image (grande, pour la précision de lecture) et remplit le
-  // formulaire. storeDataUrl, si fourni, remplace la miniature enregistrée
-  // (utilisé lors d'une nouvelle photo) ; laissé à null lors d'un simple
-  // nouvel essai sur une photo déjà enregistrée, pour ne pas l'écraser.
   async function runAiAnalysis(analysisDataUrl, storeDataUrl){
     const feedback = document.getElementById('aiFeedback');
     const submitBtn = document.getElementById('submitFormBtn');
@@ -1357,7 +1391,7 @@ Utilise "arrange" pour tout spiritueux infusé, aromatisé ou fruit macéré dan
       const parsed = await withTimeout(callGeminiJSON([
         { text: AI_LABEL_PROMPT },
         { inline_data: { mime_type: "image/jpeg", data: base64Content } }
-      ]), 25000, "L'IA met trop de temps à répondre");
+      ]), 40000, "L'IA met trop de temps à répondre");
 
       document.getElementById('nameInput').value = parsed.nom || '';
       document.getElementById('catInput').value = parsed.categorie || '';
@@ -1385,9 +1419,6 @@ Utilise "arrange" pour tout spiritueux infusé, aromatisé ou fruit macéré dan
     btn.classList.toggle('hidden', !has);
   }
 
-  // Relance l'analyse à partir de la photo déjà enregistrée sur la fiche —
-  // utile quand l'IA avait échoué (surcharge, clé absente à l'époque, etc.)
-  // sans avoir besoin de reprendre une photo de la bouteille.
   async function retryAiAnalysis(){
     const stored = document.getElementById('imageUrlInput').value;
     if (!stored){ showToast('Aucune photo enregistrée pour cette bouteille', 'error'); return; }
@@ -1398,16 +1429,11 @@ Utilise "arrange" pour tout spiritueux infusé, aromatisé ou fruit macéré dan
     const file = e.target.files[0];
     if (!file) return;
     const img = await loadImageEl(file);
-    // Deux versions distinctes :
-    // - une grande, envoyée à l'IA pour bien lire l'étiquette, jamais stockée ;
-    // - une petite, gardée dans la fiche (elle ne sert qu'à une icône ~48px),
-    //   ce qui réduit très fortement le poids de la sauvegarde (voir aide).
     const analysisImage = makeThumbnail(img, 1024, 0.82);
     const storedThumbnail = makeThumbnail(img, 220, 0.6);
     await runAiAnalysis(analysisImage, storedThumbnail);
   });
-  
-  // ---------- Export / Import / Reset ----------
+
   function exportData(){
     const blob = new Blob([JSON.stringify(visibleBottles(), null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
@@ -1428,9 +1454,6 @@ Utilise "arrange" pour tout spiritueux infusé, aromatisé ou fruit macéré dan
         }
         if (!confirm(`Importer ${parsed.length} bouteille(s) ? Cela remplacera votre liste actuelle.`)) return;
         const now = Date.now();
-        // On récupère d'abord la version distante pour être sûr de bien marquer
-        // comme supprimé tout ce qui existait (y compris côté partagé), sans quoi
-        // ces bouteilles réapparaîtraient à la prochaine synchronisation.
         if (Drive.signedIn && Drive.fileId){
           try {
             const remote = await Drive.pull();
@@ -1479,8 +1502,7 @@ Utilise "arrange" pour tout spiritueux infusé, aromatisé ou fruit macéré dan
     localStorage.setItem('gemini_api_key', key);
     showToast('Clé IA enregistrée sur cet appareil');
   }
-  
-  // Au chargement, on remplit le champ si la clé existe déjà
+
   window.addEventListener('DOMContentLoaded', () => {
     const savedKey = localStorage.getItem('gemini_api_key');
     if (savedKey) document.getElementById('geminiKeyInput').value = savedKey;
