@@ -852,7 +852,7 @@
               <p class="text-[11.5px] truncate" style="color:var(--muted)">${esc(b.detail || (cat ? cat.label : ''))}</p>
             </div>
           </div>
-          <span class="text-[12px] shrink-0 ml-2" style="color:var(--muted)">×${b.qty}</span>
+          <button type="button" onclick="markBottleUsedFromSuggestion(${b.id}, this)" title="Marquer comme servie (-1 en stock)" class="text-[11px] shrink-0 ml-2 px-2.5 py-1 rounded-full transition" style="background:var(--bg-900);border:1px solid var(--line);color:var(--muted)">✅ ×${b.qty}</button>
         </div>`;
       }).join('') + `</div>`;
     } else {
@@ -883,15 +883,24 @@
     btn.innerHTML = '<span class="loader" style="width:10px;height:10px;display:inline-block;vertical-align:-1px;margin-right:6px"></span> Réflexion…';
     out.textContent = '';
     try {
-      const list = lastPairingContext.inStock.map(b => {
+      // On ignore les bouteilles tombées à 0 entre-temps (ex. marquées "servie"
+      // juste avant un second clic sur "Affiner").
+      const available = lastPairingContext.inStock.filter(b => (b.qty || 0) > 0);
+      if (!available.length){
+        out.innerHTML = `<span style="color:var(--muted)">Plus aucune bouteille disponible pour ce plat dans votre cave.</span>`;
+        return;
+      }
+      const list = available.map(b => {
         const cat = CAT_BY_KEY[b.category];
         return `- ${b.name}${b.detail ? ' (' + b.detail + ')' : ''} [catégorie : ${cat ? cat.label : b.category}, quantité : ${b.qty}]`;
       }).join('\n');
-      const prompt = `Tu es un sommelier. Plat à accorder : "${lastPairingContext.dish}".
+      const prompt = `Tu es un sommelier exigeant et honnête. Plat à accorder : "${lastPairingContext.dish}".
 Voici UNIQUEMENT les bouteilles réellement disponibles dans la cave :
 ${list}
 Choisis jusqu'à 3 bouteilles parmi cette liste (jamais une bouteille absente de la liste), classées de la meilleure à la moins bonne pour ce plat.
-Réponds UNIQUEMENT en JSON strict, sans texte autour : {"reason":"une phrase courte expliquant le choix global","picks":["nom exact du meilleur choix","nom exact du 2e choix","nom exact du 3e choix"]}`;
+Sois honnête : si aucune de ces bouteilles ne fait un VRAI bon accord avec ce plat (juste un pis-aller acceptable), dis-le clairement.
+Réponds UNIQUEMENT en JSON strict, sans texte autour :
+{"reason":"une phrase courte expliquant le choix global","picks":["nom exact du meilleur choix","nom exact du 2e choix","nom exact du 3e choix"],"goodMatch":true ou false selon qu'un accord vraiment réussi est possible avec ce qui est disponible,"shoppingSuggestion":"si goodMatch est false, décris en une phrase le type de bouteille idéal à acheter pour un accord parfait (cépage/appellation/style de vin ou de spiritueux, pas une marque précise) ; sinon chaîne vide"}`;
       const parsed = await withTimeout(callGeminiJSON([{ text: prompt }]), 25000, "L'IA met trop de temps à répondre");
       const rawPicks = Array.isArray(parsed.picks) ? parsed.picks.slice(0, 3) : [];
 
@@ -902,8 +911,8 @@ Réponds UNIQUEMENT en JSON strict, sans texte autour : {"reason":"une phrase co
       const pickedBottles = [];
       rawPicks.forEach(name => {
         const norm = normalize(name);
-        const found = lastPairingContext.inStock.find(b => normalize(b.name) === norm) ||
-          lastPairingContext.inStock.find(b => normalize(b.name).includes(norm) || norm.includes(normalize(b.name)));
+        const found = available.find(b => normalize(b.name) === norm) ||
+          available.find(b => normalize(b.name).includes(norm) || norm.includes(normalize(b.name)));
         if (found && !seen.has(found.id)){ seen.add(found.id); pickedBottles.push(found); }
       });
 
@@ -919,13 +928,22 @@ Réponds UNIQUEMENT en JSON strict, sans texte autour : {"reason":"une phrase co
               <p class="text-[14px] font-medium truncate" style="color:var(--cream)">${b.subtype ? `<span class="text-[9.5px] font-bold tracking-wide px-1 py-0.5 rounded mr-1" style="background:${(cat?cat.color:'#a89a8d')}2e;color:${cat?cat.color:'#a89a8d'}">${esc(b.subtype.toUpperCase())}</span>` : ''}${esc(b.name)}</p>
               <p class="text-[11.5px] truncate" style="color:var(--muted)">${esc(b.detail || (cat ? cat.label : ''))}</p>
             </div>
-            <span class="text-[12px] shrink-0" style="color:var(--muted)">×${b.qty}</span>
+            <button type="button" onclick="markBottleUsedFromSuggestion(${b.id}, this)" title="Marquer comme servie (-1 en stock)" class="text-[11px] shrink-0 px-2.5 py-1 rounded-full transition" style="background:var(--bg-900);border:1px solid var(--line);color:var(--muted)">✅ ×${b.qty}</button>
           </div>`;
         }).join('') + `</div>`;
       } else if (rawPicks.length){
         // repli si l'IA a renvoyé des noms qu'on n'a pas réussi à relier avec certitude
         html += `<p class="mt-1" style="color:var(--cream)">${rawPicks.map(esc).join(' · ')}</p>`;
       }
+
+      // Verdict honnête : si rien ne fait vraiment un bon accord, on le dit
+      // clairement et on suggère quoi acheter pour un accompagnement parfait.
+      if (parsed.goodMatch === false && parsed.shoppingSuggestion){
+        html += `<div class="mt-3 pt-3" style="border-top:1px dashed var(--line)">
+          <p class="text-[12.5px] leading-relaxed" style="color:var(--muted)">🛒 <strong style="color:var(--gold)">Aucun accord vraiment idéal en stock.</strong> Pour un accompagnement parfait, pensez à ajouter à votre cave : ${esc(parsed.shoppingSuggestion)}</p>
+        </div>`;
+      }
+
       out.innerHTML = html;
     } catch(e){
       console.error(e);
@@ -933,6 +951,22 @@ Réponds UNIQUEMENT en JSON strict, sans texte autour : {"reason":"une phrase co
     } finally {
       btn.disabled = false;
       btn.textContent = "🍷 Affiner avec l'IA";
+    }
+  }
+
+  // Marque une bouteille comme servie directement depuis une carte de
+  // suggestion (locale ou IA) : retire une unité du stock sans avoir à
+  // rouvrir la fiche de la bouteille.
+  async function markBottleUsedFromSuggestion(id, btnEl){
+    const b = bottles.find(x => x.id === id);
+    if (!b){ if (btnEl){ btnEl.disabled = true; btnEl.textContent = '—'; } return; }
+    if ((b.qty || 0) <= 0){ showToast('Déjà à 0 en stock', 'error'); return; }
+    if (btnEl){ btnEl.disabled = true; btnEl.textContent = '…'; }
+    await adjustQty(id, -1);
+    showToast(`« ${b.name} » servie — stock mis à jour`);
+    if (btnEl){
+      btnEl.textContent = `✅ Servie (×${b.qty})`;
+      btnEl.style.opacity = '0.65';
     }
   }
 
