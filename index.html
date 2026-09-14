@@ -957,11 +957,15 @@ Réponds UNIQUEMENT en JSON strict, sans texte autour :
   // Marque une bouteille comme servie directement depuis une carte de
   // suggestion (locale ou IA) : retire une unité du stock sans avoir à
   // rouvrir la fiche de la bouteille.
-  async function markBottleUsedFromSuggestion(id, btnEl){
-    const b = bottles.find(x => x.id === id);
-    if (!b){ if (btnEl){ btnEl.disabled = true; btnEl.textContent = '—'; } return; }
-    if ((b.qty || 0) <= 0){ showToast('Déjà à 0 en stock', 'error'); return; }
-    if (btnEl){ btnEl.disabled = true; btnEl.textContent = '…'; }
+async function markBottleUsedFromSuggestion(id, btnEl){
+  const b = bottles.find(x => x.id === id);
+  if (!b){ if (btnEl){ btnEl.disabled = true; btnEl.textContent = '—'; } return; }
+  if ((b.qty || 0) <= 0){ showToast('Déjà à 0 en stock', 'error'); return; }
+
+  // Sécurité anti-missclick : demande de confirmation
+  if (!confirm(`Confirmez-vous le retrait d'une bouteille de " ${b.name} " de votre cave ?`)) return;
+
+  if (btnEl){ btnEl.disabled = true; btnEl.textContent = '…'; }
     await adjustQty(id, -1);
     showToast(`« ${b.name} » servie — stock mis à jour`);
     if (btnEl){
@@ -1257,7 +1261,7 @@ Réponds UNIQUEMENT en JSON strict, sans texte autour :
   // cas de forte affluence côté Google. On essaie donc plusieurs modèles dans
   // l'ordre, avec un court réessai sur chacun en cas de surcharge (503/429),
   // avant d'abandonner. gemini-3.6-flash est la version stable courante.
-  const GEMINI_MODEL_CANDIDATES = ['gemini-3.6-flash', 'gemini-2.5-flash', 'gemini-flash-latest'];
+  const GEMINI_MODEL_CANDIDATES = ['gemini-3.6-flash', 'gemini-flash-latest'];
 
   // Marque une erreur comme définitive (clé invalide, contenu refusé...) :
   // inutile de la retenter sur ce modèle ni les suivants.
