@@ -61,7 +61,7 @@
       <h2 class="font-serif-display text-[20px] md:text-[22px] mb-1" style="color:var(--gold)">Quel vin pour ce soir ?</h2>
       <p class="text-[13px] mb-4" style="color:var(--muted)">Décrivez le plat, ou choisissez une suggestion — l'accord est calculé à partir des bouteilles réellement disponibles dans votre cave.</p>
       <div class="flex flex-col sm:flex-row gap-2.5 mb-3">
-        <input type="text" id="dishInput" placeholder="Ex. choucroute, magret, plateau de fromages…" onkeydown="if(event.key==='Enter') suggestPairing()" class="flex-1 rounded-xl px-4 py-3 text-[14px] transition" style="background:var(--bg-950);border:1px solid var(--line);color:var(--cream)">
+        <input type="text" id="dishInput" name="cave-dish-query" autocomplete="off" placeholder="Ex. choucroute, magret, plateau de fromages…" onkeydown="if(event.key==='Enter') suggestPairing()" class="flex-1 rounded-xl px-4 py-3 text-[14px] transition" style="background:var(--bg-950);border:1px solid var(--line);color:var(--cream)">
         <button onclick="suggestPairing()" class="font-semibold px-6 py-3 rounded-xl transition" style="background:var(--gold);color:var(--bg-950)">Proposer un accord</button>
       </div>
       <div class="flex flex-wrap gap-2" id="dishChips"></div>
@@ -73,7 +73,7 @@
         <span class="absolute inset-y-0 left-0 flex items-center pl-3.5" style="color:var(--muted)">
           <svg class="w-4 h-4" fill="none" viewBox="0 0 20 20" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="m19 19-4-4m0-7A7 7 0 1 1 1 8a7 7 0 0 1 14 0Z"/></svg>
         </span>
-        <input type="text" id="searchInput" oninput="renderApp()" placeholder="Rechercher dans votre cave…" class="w-full rounded-xl pl-10 pr-4 py-3 text-[14px] transition" style="background:var(--bg-900);border:1px solid var(--line);color:var(--cream)">
+        <input type="search" id="searchInput" name="cave-search-query" oninput="renderApp()" placeholder="Rechercher dans votre cave…" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" class="w-full rounded-xl pl-10 pr-4 py-3 text-[14px] transition" style="background:var(--bg-900);border:1px solid var(--line);color:var(--cream)">
       </div>
       <div class="flex gap-2 overflow-x-auto pb-1" id="categoryFilters"></div>
     </div>
@@ -83,8 +83,8 @@
   </div>
 
   <!-- Modal Ajout/Édition -->
-  <div id="bottleModal" class="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4 hidden">
-    <div class="rounded-2xl w-full max-w-md p-6 shadow-2xl relative max-h-[90vh] overflow-y-auto" style="background:var(--bg-900);border:1px solid var(--line)">
+  <div id="bottleModal" class="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4 hidden" onclick="if(event.target===this) closeModal()">
+    <div class="rounded-2xl w-full max-w-md p-6 shadow-2xl relative overflow-y-auto" style="background:var(--bg-900);border:1px solid var(--line);max-height:90vh;max-height:90dvh">
       <h2 id="modalTitle" class="font-serif-display text-[20px] mb-4" style="color:var(--gold)">Ajouter une bouteille</h2>
       <form id="bottleForm" onsubmit="handleFormSubmit(event)" class="space-y-4">
         <input type="hidden" id="bottleId">
@@ -104,6 +104,19 @@
         <div>
           <label class="block text-[13px] font-medium mb-1" style="color:var(--muted)">Nom</label>
           <input type="text" id="nameInput" required placeholder="Ex. Château Haut Selve" class="w-full rounded-xl px-3 py-2.5 text-[14px]" style="background:var(--bg-950);border:1px solid var(--line);color:var(--cream)">
+        </div>
+
+        <div>
+          <label class="block text-[13px] font-medium mb-1" style="color:var(--muted)">Type précis <span class="font-normal">(facultatif)</span></label>
+          <input type="text" id="subtypeInput" list="subtypeOptions" placeholder="Ex. Gin, Whisky, Cognac, Bordeaux…" class="w-full rounded-xl px-3 py-2.5 text-[14px]" style="background:var(--bg-950);border:1px solid var(--line);color:var(--cream)">
+          <datalist id="subtypeOptions">
+            <option value="Gin"><option value="Rhum"><option value="Rhum arrangé"><option value="Whisky">
+            <option value="Vodka"><option value="Cognac"><option value="Armagnac"><option value="Tequila">
+            <option value="Calvados"><option value="Limoncello"><option value="Liqueur">
+            <option value="Champagne"><option value="Crémant"><option value="Bordeaux"><option value="Bourgogne">
+            <option value="Côtes du Rhône"><option value="Porto"><option value="Muscat">
+          </datalist>
+          <p class="text-[11.5px] mt-1" style="color:var(--muted)">Affiché en badge à côté du nom pour l'identifier d'un coup d'œil.</p>
         </div>
 
         <div>
@@ -153,8 +166,8 @@
   </div>
 
   <!-- Modal Sauvegarde / Aide -->
-  <div id="helpModal" class="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4 hidden">
-    <div class="rounded-2xl w-full max-w-md p-6 shadow-2xl relative" style="background:var(--bg-900);border:1px solid var(--line)">
+  <div id="helpModal" class="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4 hidden" onclick="if(event.target===this) closeHelpModal()">
+    <div class="rounded-2xl w-full max-w-md p-6 shadow-2xl relative overflow-y-auto" style="background:var(--bg-900);border:1px solid var(--line);max-height:90vh;max-height:90dvh">
       <h2 class="font-serif-display text-[20px] mb-3" style="color:var(--gold)">Sauvegarde & données</h2>
       <p id="storageExplain" class="text-[13px] leading-relaxed mb-5" style="color:var(--muted)"></p>
 
@@ -173,7 +186,7 @@
       <div class="mb-5 p-4 rounded-xl" style="background:var(--bg-950);border:1px solid var(--line)">
         <label class="block text-[13px] font-medium mb-2" style="color:var(--gold)">Clé IA (Gemini)</label>
         <div class="flex gap-2">
-          <input type="password" id="geminiKeyInput" placeholder="Clé commençant par AQ..." class="flex-1 rounded-xl px-3 py-2 text-[13px]" style="background:var(--bg-900);border:1px solid var(--line);color:var(--cream)">
+          <input type="password" id="geminiKeyInput" autocomplete="off" placeholder="Clé commençant par AQ..." class="flex-1 rounded-xl px-3 py-2 text-[13px]" style="background:var(--bg-900);border:1px solid var(--line);color:var(--cream)">
           <button onclick="saveGeminiKey()" class="rounded-xl px-3 py-2 text-[13px] font-medium" style="background:var(--gold);color:var(--bg-950)">Sauver</button>
         </div>
         <p class="text-[11px] mt-2" style="color:var(--muted)">Stockée uniquement sur cet appareil.</p>
@@ -835,7 +848,7 @@
           <div class="flex items-center gap-2.5 min-w-0">
             <span>${cat ? cat.emoji : '🍾'}</span>
             <div class="min-w-0">
-              <p class="text-[14px] font-medium truncate" style="color:var(--cream)">${esc(b.name)}</p>
+              <p class="text-[14px] font-medium truncate" style="color:var(--cream)">${b.subtype ? `<span class="text-[9.5px] font-bold tracking-wide px-1 py-0.5 rounded mr-1" style="background:${(cat?cat.color:'#a89a8d')}2e;color:${cat?cat.color:'#a89a8d'}">${esc(b.subtype.toUpperCase())}</span>` : ''}${esc(b.name)}</p>
               <p class="text-[11.5px] truncate" style="color:var(--muted)">${esc(b.detail || (cat ? cat.label : ''))}</p>
             </div>
           </div>
@@ -879,7 +892,7 @@ Voici UNIQUEMENT les bouteilles réellement disponibles dans la cave :
 ${list}
 Choisis jusqu'à 3 bouteilles parmi cette liste (jamais une bouteille absente de la liste), classées de la meilleure à la moins bonne pour ce plat.
 Réponds UNIQUEMENT en JSON strict, sans texte autour : {"reason":"une phrase courte expliquant le choix global","picks":["nom exact du meilleur choix","nom exact du 2e choix","nom exact du 3e choix"]}`;
-      const parsed = await callGeminiJSON([{ text: prompt }]);
+      const parsed = await withTimeout(callGeminiJSON([{ text: prompt }]), 25000, "L'IA met trop de temps à répondre");
       const rawPicks = Array.isArray(parsed.picks) ? parsed.picks.slice(0, 3) : [];
 
       // On relie chaque nom renvoyé par l'IA à la bouteille réelle en stock,
@@ -903,7 +916,7 @@ Réponds UNIQUEMENT en JSON strict, sans texte autour : {"reason":"une phrase co
             <span class="text-[15px] shrink-0">${rankIcons[i] || '•'}</span>
             <span class="shrink-0">${cat ? cat.emoji : '🍾'}</span>
             <div class="min-w-0 flex-1">
-              <p class="text-[14px] font-medium truncate" style="color:var(--cream)">${esc(b.name)}</p>
+              <p class="text-[14px] font-medium truncate" style="color:var(--cream)">${b.subtype ? `<span class="text-[9.5px] font-bold tracking-wide px-1 py-0.5 rounded mr-1" style="background:${(cat?cat.color:'#a89a8d')}2e;color:${cat?cat.color:'#a89a8d'}">${esc(b.subtype.toUpperCase())}</span>` : ''}${esc(b.name)}</p>
               <p class="text-[11.5px] truncate" style="color:var(--muted)">${esc(b.detail || (cat ? cat.label : ''))}</p>
             </div>
             <span class="text-[12px] shrink-0" style="color:var(--muted)">×${b.qty}</span>
@@ -963,7 +976,7 @@ Réponds UNIQUEMENT en JSON strict, sans texte autour : {"reason":"une phrase co
 
     const filtered = visibleBottles().filter(b => {
       const mCat = activeCategory === 'Tous' || b.category === activeCategory;
-      const hay = normalize(`${b.name} ${b.detail || ''} ${b.notes || ''}`);
+      const hay = normalize(`${b.name} ${b.subtype || ''} ${b.detail || ''} ${b.notes || ''}`);
       const mSearch = !search || hay.includes(search);
       return mCat && mSearch;
     });
@@ -988,7 +1001,10 @@ Réponds UNIQUEMENT en JSON strict, sans texte autour : {"reason":"une phrase co
             ${b.image ? `<img src="${b.image}" class="w-full h-full object-cover" alt="">` : cat.emoji}
           </div>
           <div class="flex-1 min-w-0">
-            <h3 class="font-serif-display text-[16px] font-semibold truncate" style="color:var(--cream)">${esc(b.name)}</h3>
+            <div class="flex items-center gap-1.5 flex-wrap">
+              ${b.subtype ? `<span class="text-[10px] font-bold tracking-wide px-1.5 py-0.5 rounded shrink-0" style="background:${cat.color}2e;color:${cat.color}">${esc(b.subtype.toUpperCase())}</span>` : ''}
+              <h3 class="font-serif-display text-[16px] font-semibold truncate" style="color:var(--cream)">${esc(b.name)}</h3>
+            </div>
             ${b.detail ? `<p class="text-[12px] mt-0.5 leading-relaxed line-clamp-2" style="color:var(--muted)">${esc(b.detail)}</p>` : ''}
             <div class="flex items-center gap-2 mt-1 flex-wrap">
               <span class="text-[11px] px-2 py-0.5 rounded-full" style="${statusStyle}">${b.status}</span>
@@ -1051,6 +1067,7 @@ Réponds UNIQUEMENT en JSON strict, sans texte autour : {"reason":"une phrase co
       document.getElementById('bottleId').value = b.id;
       document.getElementById('catInput').value = b.category || '';
       document.getElementById('nameInput').value = b.name || '';
+      document.getElementById('subtypeInput').value = b.subtype || '';
       document.getElementById('detailInput').value = b.detail || '';
       document.getElementById('qtyInput').value = b.qty;
       document.getElementById('statusInput').value = b.status;
@@ -1136,6 +1153,7 @@ Réponds UNIQUEMENT en JSON strict, sans texte autour : {"reason":"une phrase co
       id: id ? parseInt(id) : Date.now(),
       category: document.getElementById('catInput').value,
       name: document.getElementById('nameInput').value.trim(),
+      subtype: document.getElementById('subtypeInput').value.trim(),
       detail: document.getElementById('detailInput').value.trim(),
       qty: parseInt(document.getElementById('qtyInput').value) || 0,
       status: document.getElementById('statusInput').value,
@@ -1207,6 +1225,10 @@ Réponds UNIQUEMENT en JSON strict, sans texte autour : {"reason":"une phrase co
   // avant d'abandonner. gemini-3.6-flash est la version stable courante.
   const GEMINI_MODEL_CANDIDATES = ['gemini-3.6-flash', 'gemini-2.5-flash', 'gemini-flash-latest'];
 
+  // Marque une erreur comme définitive (clé invalide, contenu refusé...) :
+  // inutile de la retenter sur ce modèle ni les suivants.
+  class NonRetryableAIError extends Error {}
+
   async function callGeminiJSON(parts){
     const geminiKey = localStorage.getItem('gemini_api_key');
     if (!geminiKey) throw new Error('Clé IA manquante');
@@ -1226,9 +1248,15 @@ Réponds UNIQUEMENT en JSON strict, sans texte autour : {"reason":"une phrase co
           if (data.error){
             const overloaded = data.error.code === 503 || data.error.code === 429 ||
               data.error.status === 'UNAVAILABLE' || data.error.status === 'RESOURCE_EXHAUSTED';
-            lastErr = new Error(data.error.message);
-            if (overloaded){ await new Promise(r => setTimeout(r, 800 + attempt * 700)); continue; }
-            throw lastErr;
+            if (overloaded){
+              lastErr = new Error(data.error.message);
+              await new Promise(r => setTimeout(r, 800 + attempt * 700));
+              continue;
+            }
+            // Erreur définitive (clé invalide, requête refusée...) : elle se
+            // reproduirait à l'identique sur chaque tentative, inutile
+            // d'insister et de faire attendre l'utilisateur pour rien.
+            throw new NonRetryableAIError(data.error.message);
           }
           if (!data.candidates || !data.candidates.length || !data.candidates[0].content){
             const reason = data.promptFeedback && data.promptFeedback.blockReason ? ` (${data.promptFeedback.blockReason})` : '';
@@ -1236,6 +1264,7 @@ Réponds UNIQUEMENT en JSON strict, sans texte autour : {"reason":"une phrase co
           }
           return JSON.parse(data.candidates[0].content.parts[0].text);
         } catch(e){
+          if (e instanceof NonRetryableAIError) throw e; // abandon immédiat, aucun réessai
           lastErr = e;
         }
       }
@@ -1244,11 +1273,22 @@ Réponds UNIQUEMENT en JSON strict, sans texte autour : {"reason":"une phrase co
     throw lastErr;
   }
 
+  // Garde-fou : quoi qu'il arrive (réseau qui traîne, requête qui ne répond
+  // jamais...), on rend la main à l'interface au bout d'un délai maximal
+  // plutôt que de laisser un bouton ou un formulaire bloqué indéfiniment.
+  function withTimeout(promise, ms, message){
+    return Promise.race([
+      promise,
+      new Promise((_, reject) => setTimeout(() => reject(new Error(message || "Délai dépassé")), ms))
+    ]);
+  }
+
   const AI_LABEL_PROMPT = `Tu es un sommelier expert. Analyse cette étiquette de bouteille.
 Renvoie UNIQUEMENT un objet JSON valide avec cette structure exacte, sans aucun texte autour :
 {
   "nom": "Nom du domaine et de la cuvée",
   "categorie": "L'une de ces valeurs exactes : rouge, blanc, rose, bulles, cuit, spiritueux, arrange, sans_alcool",
+  "type": "Type précis et court, affiché en badge (ex: Gin, Rhum, Whisky, Vodka, Cognac, Limoncello, Bordeaux, Champagne...)",
   "detail": "Appellation, cépage, millésime",
   "prix": "Estimation du prix moyen en euros (ex: 15€ - 20€)",
   "notes": "Courte note de dégustation. Propose un accord avec une cuisine semi-gastronomique simple. Si c'est un vin rouge, oriente vers des plats épicés. Si c'est un rhum/vin cuit, oriente vers un dessert fort en chocolat. Adapte tes suggestions pour qu'elles puissent se décliner facilement pour un enfant. IMPORTANT : Ne propose JAMAIS d'accords contenant des champignons."
@@ -1276,13 +1316,14 @@ Utilise "arrange" pour tout spiritueux infusé, aromatisé ou fruit macéré dan
       updateRetryButtonVisibility();
 
       const base64Content = analysisDataUrl.split(',')[1];
-      const parsed = await callGeminiJSON([
+      const parsed = await withTimeout(callGeminiJSON([
         { text: AI_LABEL_PROMPT },
         { inline_data: { mime_type: "image/jpeg", data: base64Content } }
-      ]);
+      ]), 25000, "L'IA met trop de temps à répondre");
 
       document.getElementById('nameInput').value = parsed.nom || '';
       document.getElementById('catInput').value = parsed.categorie || '';
+      document.getElementById('subtypeInput').value = parsed.type || '';
       document.getElementById('detailInput').value = parsed.detail || '';
       document.getElementById('priceInput').value = parsed.prix || '';
       document.getElementById('notesInput').value = parsed.notes || '';
