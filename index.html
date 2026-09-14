@@ -1261,7 +1261,7 @@ async function markBottleUsedFromSuggestion(id, btnEl){
   // cas de forte affluence côté Google. On essaie donc plusieurs modèles dans
   // l'ordre, avec un court réessai sur chacun en cas de surcharge (503/429),
   // avant d'abandonner. gemini-3.6-flash est la version stable courante.
-  const GEMINI_MODEL_CANDIDATES = ['gemini-3.6-flash', 'gemini-3.6-flash-8b', 'gemini-3.6-flash-latest'];
+  const GEMINI_MODEL_CANDIDATES = ['gemini-3.6-flash',  'gemini-3.6-flash-latest', 'gemini-3.6-flash-8b'];
 
   // Marque une erreur comme définitive (clé invalide, contenu refusé...) :
   // inutile de la retenter sur ce modèle ni les suivants.
@@ -1288,7 +1288,7 @@ async function markBottleUsedFromSuggestion(id, btnEl){
               data.error.status === 'UNAVAILABLE' || data.error.status === 'RESOURCE_EXHAUSTED';
             if (overloaded){
               lastErr = new Error(data.error.message);
-              await new Promise(r => setTimeout(r, 500 + attempt * 500));
+              await new Promise(r => setTimeout(r, 800 + attempt * 700));
               continue;
             }
             // Erreur définitive (clé invalide, requête refusée...) : elle se
