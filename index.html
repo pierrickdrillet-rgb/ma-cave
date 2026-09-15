@@ -192,6 +192,15 @@
         <p class="text-[11px] mt-2" style="color:var(--muted)">Stockée uniquement sur cet appareil.</p>
       </div>
 
+      <div class="mb-5 p-4 rounded-xl" style="background:var(--bg-950);border:1px solid var(--line)">
+        <label class="block text-[13px] font-medium mb-2" style="color:var(--gold)">Clé IA de secours (Mistral) <span class="font-normal" style="color:var(--muted)">— optionnel</span></label>
+        <div class="flex gap-2">
+          <input type="password" id="mistralKeyInput" autocomplete="off" placeholder="Clé de La Plateforme Mistral" class="flex-1 rounded-xl px-3 py-2 text-[13px]" style="background:var(--bg-900);border:1px solid var(--line);color:var(--cream)">
+          <button onclick="saveMistralKey()" class="rounded-xl px-3 py-2 text-[13px] font-medium" style="background:var(--gold);color:var(--bg-950)">Sauver</button>
+        </div>
+        <p class="text-[11px] mt-2" style="color:var(--muted)">Utilisée automatiquement si Gemini échoue (quota épuisé, panne…) — via le palier gratuit "Experiment" de <a href="https://console.mistral.ai/api-keys" target="_blank" rel="noopener" style="color:var(--gold);text-decoration:underline">La Plateforme Mistral</a>. Stockée uniquement sur cet appareil.</p>
+      </div>
+
       <div class="space-y-2.5">
         <button onclick="exportData()" class="w-full flex items-center justify-between rounded-xl px-4 py-3 text-[14px] transition" style="background:var(--bg-950);border:1px solid var(--line);color:var(--cream)">
           <span>Exporter une sauvegarde</span>
@@ -811,7 +820,7 @@
       html += `<p class="text-[13px]" style="color:var(--muted)">Votre cave est vide pour l'instant — ajoutez quelques bouteilles pour recevoir des suggestions.</p>`;
     }
 
-    if (localStorage.getItem('gemini_api_key') && inStock.length > 0){
+    if ((localStorage.getItem('gemini_api_key') || localStorage.getItem('mistral_api_key')) && inStock.length > 0){
       html += `<div class="mt-3 pt-3" style="border-top:1px solid var(--line)">
         <button type="button" onclick="refineWithAI()" id="aiPairingBtn" class="text-[12.5px] px-3 py-1.5 rounded-full transition" style="border:1px solid var(--line);color:var(--gold)">🍷 Affiner avec l'IA</button>
         <div id="aiPairingResult" class="mt-2 text-[13px] leading-relaxed"></div>
@@ -846,7 +855,7 @@ Choisis jusqu'à 3 bouteilles parmi cette liste (jamais une bouteille absente de
 Sois honnête : si aucune de ces bouteilles ne fait un VRAI bon accord avec ce plat (juste un pis-aller acceptable), dis-le clairement.
 Réponds UNIQUEMENT en JSON strict, sans texte autour :
 {"reason":"une phrase courte expliquant le choix global","picks":["nom exact du meilleur choix","nom exact du 2e choix","nom exact du 3e choix"],"goodMatch":true ou false selon qu'un accord vraiment réussi est possible avec ce qui est disponible,"shoppingSuggestion":"si goodMatch est false, décris en une phrase le type de bouteille idéal à acheter pour un accord parfait (cépage/appellation/style de vin ou de spiritueux, pas une marque précise) ; sinon chaîne vide"}`;
-      const parsed = await withTimeout(callGeminiJSON([{ text: prompt }]), 40000, "L'IA met trop de temps à répondre");
+      const parsed = await withTimeout(callAIJSON(prompt), 40000, "L'IA met trop de temps à répondre");
       const rawPicks = Array.isArray(parsed.picks) ? parsed.picks.slice(0, 3) : [];
 
       const seen = new Set();
@@ -1200,6 +1209,14 @@ async function markBottleUsedFromSuggestion(id, btnEl){
   //     justifie un nouvel essai. Le code précédent traitait presque tout
   //     comme transitoire, ce qui gaspillait le temps disponible à retenter
   //     des erreurs qui ne pouvaient de toute façon pas réussir.
+  //
+  //  4) NOUVEAU — Quota journalier épuisé : le palier gratuit de Google
+  //     s'applique au niveau du PROJET Google Cloud (pas par clé, pas par
+  //     modèle isolément dans bien des cas). Une fois ce quota atteint,
+  //     changer de modèle Gemini ne suffit plus. On bascule alors sur un
+  //     second fournisseur IA indépendant (Mistral, dont le palier gratuit
+  //     "Experiment" a un débit journalier bien plus généreux) pour que
+  //     l'analyse continue de fonctionner même quand Gemini est à sec.
   const GEMINI_FALLBACK_MODELS = ['gemini-3.6-flash', 'gemini-3.5-flash-lite', 'gemini-3.1-flash-lite'];
   const GEMINI_MODEL_CACHE_KEY = 'gemini_model_candidates_cache_v1';
   const GEMINI_MODEL_CACHE_TTL = 24 * 60 * 60 * 1000; // 24h : la gamme de modèles ne change pas d'une minute à l'autre
@@ -1352,6 +1369,184 @@ async function markBottleUsedFromSuggestion(id, btnEl){
     throw lastErr;
   }
 
+  // ==========================================================================
+  // Fournisseur IA de secours — Mistral (La Plateforme)
+  // ==========================================================================
+  // Choisi plutôt qu'OpenAI/ChatGPT car l'API OpenAI n'a plus de palier
+  // vraiment gratuit (seulement des crédits d'essai limités dans le temps),
+  // alors que Mistral propose un palier "Experiment" gratuit et conçu pour
+  // l'évaluation, avec un débit journalier bien plus généreux que le quota
+  // gratuit Gemini. Comme il s'agit d'un compte et d'un quota totalement
+  // séparés de Google, ce secours continue de fonctionner un jour où le
+  // quota Gemini est épuisé. L'API est compatible avec le format OpenAI
+  // (/v1/chat/completions), donc la structure des appels est proche de
+  // celle utilisée pour Gemini. Comme pour Gemini, on interroge
+  // la liste réelle des modèles disponibles (GET /v1/models, champ
+  // "capabilities.vision") plutôt que de figer un nom en dur, car Mistral
+  // retire et renomme régulièrement ses modèles (ex. pixtral-12b-2409,
+  // retiré, remplacé par des modèles "large/medium/small" multimodaux).
+  const MISTRAL_FALLBACK_MODELS = ['pixtral-large-latest', 'mistral-medium-latest', 'mistral-small-latest'];
+  const MISTRAL_MODEL_CACHE_KEY = 'mistral_model_candidates_cache_v1';
+  const MISTRAL_MODEL_CACHE_TTL = 24 * 60 * 60 * 1000;
+
+  // Sélectionne les meilleurs modèles disponibles pour cette clé, capables
+  // de lire une image quand c'est nécessaire (capabilities.vision côté
+  // Mistral). Mis en cache 24h.
+  async function getMistralModelCandidates(apiKey, needsImage){
+    const cacheKey = MISTRAL_MODEL_CACHE_KEY + (needsImage ? '_vision' : '_text');
+    try {
+      const cachedRaw = localStorage.getItem(cacheKey);
+      if (cachedRaw){
+        const cached = JSON.parse(cachedRaw);
+        if (cached.key === apiKey && Array.isArray(cached.models) && cached.models.length &&
+            (Date.now() - cached.at) < MISTRAL_MODEL_CACHE_TTL){
+          return cached.models;
+        }
+      }
+    } catch(e){}
+
+    try {
+      const res = await fetch('https://api.mistral.ai/v1/models', {
+        headers: { Authorization: 'Bearer ' + apiKey }
+      });
+      if (!res.ok) throw new Error('liste de modèles indisponible');
+      const data = await res.json();
+      const all = Array.isArray(data.data) ? data.data : [];
+
+      const sizeRank = (id) => /large/i.test(id) ? 3 : /medium/i.test(id) ? 2 : /small/i.test(id) ? 1 : 0;
+      const isLatestAlias = (id) => /-latest$/i.test(id);
+
+      const candidates = all
+        .filter(m => m.capabilities && m.capabilities.completion_chat && (!needsImage || m.capabilities.vision))
+        .map(m => m.id)
+        .filter(id => !/embed|moderation|ocr|fim|codestral/i.test(id))
+        .sort((a, b) => {
+          const latestDiff = (isLatestAlias(b) ? 1 : 0) - (isLatestAlias(a) ? 1 : 0); // alias "-latest" d'abord : suit automatiquement les mises à jour Mistral
+          if (latestDiff !== 0) return latestDiff;
+          return sizeRank(b) - sizeRank(a); // plus grand modèle d'abord (meilleure qualité de lecture d'étiquette)
+        });
+
+      const top = [...new Set(candidates)].slice(0, 3);
+      if (top.length){
+        localStorage.setItem(cacheKey, JSON.stringify({ key: apiKey, at: Date.now(), models: top }));
+        return top;
+      }
+    } catch(e){
+      console.error('Liste de modèles Mistral indisponible, utilisation de la liste de secours', e);
+    }
+    return MISTRAL_FALLBACK_MODELS;
+  }
+
+  async function callOneMistralModel(model, promptText, imageDataUrl, apiKey, timeoutMs){
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      const content = imageDataUrl
+        ? [{ type: 'text', text: promptText }, { type: 'image_url', image_url: { url: imageDataUrl } }]
+        : promptText;
+
+      const response = await fetch('https://api.mistral.ai/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: 'Bearer ' + apiKey
+        },
+        signal: controller.signal,
+        body: JSON.stringify({
+          model,
+          messages: [{ role: 'user', content }],
+          max_tokens: 1500
+        })
+      });
+
+      let data;
+      try { data = await response.json(); }
+      catch(e){ throw new Error('Réponse invalide du serveur IA (secours)'); }
+
+      if (!response.ok || data.error || data.message){
+        const code = response.status;
+        const message = (data.error && (data.error.message || data.error)) || data.message || `Erreur HTTP ${response.status}`;
+        if (code === 404) throw new ModelUnavailableError(message);
+        if (code === 401 || code === 403) throw new NonRetryableAIError('Clé IA de secours invalide ou refusée : ' + message);
+        if (code === 400) throw new ModelUnavailableError(message); // souvent : ce modèle ne supporte pas ce type de contenu
+        throw new Error(message); // 429 / 503 : potentiellement transitoire
+      }
+
+      const choice = data.choices && data.choices[0];
+      let text = choice && choice.message && choice.message.content;
+      if (!text) throw new Error("Réponse vide de l'IA de secours");
+      text = String(text).trim().replace(/^```json\s*/i, '').replace(/^```\s*/, '').replace(/```\s*$/, '').trim();
+      try { return JSON.parse(text); }
+      catch(e){
+        // Sans mode JSON strict, un modèle peut ajouter un peu de texte autour malgré la consigne.
+        const match = text.match(/\{[\s\S]*\}/);
+        if (match){ try { return JSON.parse(match[0]); } catch(e2){} }
+        throw new Error("Réponse IA de secours mal formée (JSON invalide)");
+      }
+    } catch(e){
+      if (e.name === 'AbortError') throw new Error('Délai dépassé pour ce modèle de secours');
+      throw e;
+    } finally {
+      clearTimeout(timeoutId);
+    }
+  }
+
+  async function callMistralJSON(promptText, imageDataUrl){
+    const apiKey = localStorage.getItem('mistral_api_key');
+    if (!apiKey) throw new Error('Clé IA de secours manquante');
+
+    const models = await getMistralModelCandidates(apiKey, !!imageDataUrl);
+    let lastErr = new Error('IA de secours indisponible');
+
+    for (let pass = 0; pass < 2; pass++){
+      for (const model of models){
+        try {
+          return await callOneMistralModel(model, promptText, imageDataUrl, apiKey, 15000);
+        } catch(e){
+          if (e instanceof NonRetryableAIError) throw e;
+          lastErr = e;
+          if (e instanceof ModelUnavailableError) continue;
+          if (pass > 0) await new Promise(r => setTimeout(r, 600));
+        }
+      }
+    }
+    throw lastErr;
+  }
+
+  // Point d'entrée unique utilisé partout dans l'appli : essaie Gemini en
+  // premier (si une clé est enregistrée), puis bascule automatiquement sur
+  // Mistral en cas d'échec (quota épuisé, panne, modèle retiré...) si une
+  // clé de secours est enregistrée. N'échoue que si aucun des deux
+  // fournisseurs disponibles n'a réussi.
+  async function callAIJSON(promptText, imageDataUrl){
+    const geminiKey = localStorage.getItem('gemini_api_key');
+    const mistralKey = localStorage.getItem('mistral_api_key');
+
+    if (!geminiKey && !mistralKey){
+      throw new Error('Aucune clé IA enregistrée');
+    }
+
+    if (geminiKey){
+      const parts = [{ text: promptText }];
+      if (imageDataUrl) parts.push({ inline_data: { mime_type: 'image/jpeg', data: imageDataUrl.split(',')[1] } });
+      try {
+        return await callGeminiJSON(parts);
+      } catch(e){
+        if (!mistralKey) throw e;
+        console.warn('Gemini indisponible, bascule sur le fournisseur de secours (Mistral)', e);
+        try {
+          return await callMistralJSON(promptText, imageDataUrl);
+        } catch(e2){
+          // On remonte une erreur qui reflète l'échec des DEUX fournisseurs, plus utile pour l'utilisateur.
+          throw new Error(`Gemini: ${e.message || 'échec'} — Secours: ${e2.message || 'échec'}`);
+        }
+      }
+    }
+
+    // Pas de clé Gemini : on va directement au fournisseur de secours.
+    return callMistralJSON(promptText, imageDataUrl);
+  }
+
   function withTimeout(promise, ms, message){
     return Promise.race([
       promise,
@@ -1380,18 +1575,15 @@ Utilise "arrange" pour tout spiritueux infusé, aromatisé ou fruit macéré dan
 
     try {
       const geminiKey = localStorage.getItem('gemini_api_key');
-      if (!geminiKey) {
-        feedback.innerHTML = `<span style="color:#e08a97">⚠️ Clé IA manquante. Ajoutez-la dans les paramètres (icône 📄).</span>`;
+      const mistralKey = localStorage.getItem('mistral_api_key');
+      if (!geminiKey && !mistralKey) {
+        feedback.innerHTML = `<span style="color:#e08a97">⚠️ Aucune clé IA enregistrée. Ajoutez-en une dans les paramètres (icône 📄).</span>`;
         return;
       }
       if (storeDataUrl) document.getElementById('imageUrlInput').value = storeDataUrl;
       updateRetryButtonVisibility();
 
-      const base64Content = analysisDataUrl.split(',')[1];
-      const parsed = await withTimeout(callGeminiJSON([
-        { text: AI_LABEL_PROMPT },
-        { inline_data: { mime_type: "image/jpeg", data: base64Content } }
-      ]), 40000, "L'IA met trop de temps à répondre");
+      const parsed = await withTimeout(callAIJSON(AI_LABEL_PROMPT, analysisDataUrl), 45000, "L'IA met trop de temps à répondre");
 
       document.getElementById('nameInput').value = parsed.nom || '';
       document.getElementById('catInput').value = parsed.categorie || '';
@@ -1503,9 +1695,17 @@ Utilise "arrange" pour tout spiritueux infusé, aromatisé ou fruit macéré dan
     showToast('Clé IA enregistrée sur cet appareil');
   }
 
+  function saveMistralKey() {
+    const key = document.getElementById('mistralKeyInput').value.trim();
+    localStorage.setItem('mistral_api_key', key);
+    showToast('Clé IA de secours enregistrée sur cet appareil');
+  }
+
   window.addEventListener('DOMContentLoaded', () => {
     const savedKey = localStorage.getItem('gemini_api_key');
     if (savedKey) document.getElementById('geminiKeyInput').value = savedKey;
+    const savedMistralKey = localStorage.getItem('mistral_api_key');
+    if (savedMistralKey) document.getElementById('mistralKeyInput').value = savedMistralKey;
   });
 </script>
 </body>
