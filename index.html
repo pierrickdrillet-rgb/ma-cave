@@ -940,7 +940,7 @@ Choisis jusqu'à 3 bouteilles parmi cette liste (jamais une bouteille absente de
 Sois honnête : si aucune de ces bouteilles ne fait un VRAI bon accord avec ce plat (juste un pis-aller acceptable), dis-le clairement.
 Réponds UNIQUEMENT en JSON strict, sans texte autour :
 {"reason":"une phrase courte expliquant le choix global","picks":["nom exact du meilleur choix","nom exact du 2e choix","nom exact du 3e choix"],"goodMatch":true ou false selon qu'un accord vraiment réussi est possible avec ce qui est disponible,"shoppingSuggestion":"si goodMatch est false, décris en une phrase le type de bouteille idéal à acheter pour un accord parfait (cépage/appellation/style de vin ou de spiritueux, pas une marque précise) ; sinon chaîne vide"}`;
-      const parsed = await withTimeout(callAIJSON(prompt), 40000, "L'IA met trop de temps à répondre");
+      const parsed = await withTimeout(callAIJSON(prompt), 55000, "L'IA met trop de temps à répondre");
       const rawPicks = Array.isArray(parsed.picks) ? parsed.picks.slice(0, 3) : [];
 
       const seen = new Set();
@@ -1466,68 +1466,22 @@ async function markBottleUsedFromSuggestion(id, btnEl){
   // ==========================================================================
   // Choisi plutôt qu'OpenAI/ChatGPT car l'API OpenAI n'a plus de palier
   // vraiment gratuit (seulement des crédits d'essai limités dans le temps),
-  // alors que Mistral propose un palier "Experiment" gratuit et conçu pour
-  // l'évaluation, avec un débit journalier bien plus généreux que le quota
-  // gratuit Gemini. Comme il s'agit d'un compte et d'un quota totalement
+  // alors que Mistral propose un palier "Experiment" gratuit conçu pour
+  // l'évaluation. Comme il s'agit d'un compte et d'un quota totalement
   // séparés de Google, ce secours continue de fonctionner un jour où le
   // quota Gemini est épuisé. L'API est compatible avec le format OpenAI
   // (/v1/chat/completions), donc la structure des appels est proche de
-  // celle utilisée pour Gemini. Comme pour Gemini, on interroge
-  // la liste réelle des modèles disponibles (GET /v1/models, champ
-  // "capabilities.vision") plutôt que de figer un nom en dur, car Mistral
-  // retire et renomme régulièrement ses modèles (ex. pixtral-12b-2409,
-  // retiré, remplacé par des modèles "large/medium/small" multimodaux).
-  const MISTRAL_FALLBACK_MODELS = ['pixtral-large-latest', 'mistral-medium-latest', 'mistral-small-latest'];
-  const MISTRAL_MODEL_CACHE_KEY = 'mistral_model_candidates_cache_v1';
-  const MISTRAL_MODEL_CACHE_TTL = 24 * 60 * 60 * 1000;
-
-  // Sélectionne les meilleurs modèles disponibles pour cette clé, capables
-  // de lire une image quand c'est nécessaire (capabilities.vision côté
-  // Mistral). Mis en cache 24h.
-  async function getMistralModelCandidates(apiKey, needsImage){
-    const cacheKey = MISTRAL_MODEL_CACHE_KEY + (needsImage ? '_vision' : '_text');
-    try {
-      const cachedRaw = localStorage.getItem(cacheKey);
-      if (cachedRaw){
-        const cached = JSON.parse(cachedRaw);
-        if (cached.key === apiKey && Array.isArray(cached.models) && cached.models.length &&
-            (Date.now() - cached.at) < MISTRAL_MODEL_CACHE_TTL){
-          return cached.models;
-        }
-      }
-    } catch(e){}
-
-    try {
-      const res = await fetch('https://api.mistral.ai/v1/models', {
-        headers: { Authorization: 'Bearer ' + apiKey }
-      });
-      if (!res.ok) throw new Error('liste de modèles indisponible');
-      const data = await res.json();
-      const all = Array.isArray(data.data) ? data.data : [];
-
-      const sizeRank = (id) => /large/i.test(id) ? 3 : /medium/i.test(id) ? 2 : /small/i.test(id) ? 1 : 0;
-      const isLatestAlias = (id) => /-latest$/i.test(id);
-
-      const candidates = all
-        .filter(m => m.capabilities && m.capabilities.completion_chat && (!needsImage || m.capabilities.vision))
-        .map(m => m.id)
-        .filter(id => !/embed|moderation|ocr|fim|codestral/i.test(id))
-        .sort((a, b) => {
-          const latestDiff = (isLatestAlias(b) ? 1 : 0) - (isLatestAlias(a) ? 1 : 0); // alias "-latest" d'abord : suit automatiquement les mises à jour Mistral
-          if (latestDiff !== 0) return latestDiff;
-          return sizeRank(b) - sizeRank(a); // plus grand modèle d'abord (meilleure qualité de lecture d'étiquette)
-        });
-
-      const top = [...new Set(candidates)].slice(0, 3);
-      if (top.length){
-        localStorage.setItem(cacheKey, JSON.stringify({ key: apiKey, at: Date.now(), models: top }));
-        return top;
-      }
-    } catch(e){
-      console.error('Liste de modèles Mistral indisponible, utilisation de la liste de secours', e);
-    }
-    return MISTRAL_FALLBACK_MODELS;
-  }
+  // celle utilisée pour Gemini.
+  //
+  // Contrairement à Gemini, on N'INTERROGE PAS la liste des modèles avant
+  // chaque analyse : ça faisait DEUX appels réseau par tentative (liste +
+  // analyse), ce qui suffisait à lui seul à déclencher la limite de débit
+  // du palier gratuit dès le premier essai. On utilise à la place des alias
+  // "-latest" fixes, que Mistral fait pointer automatiquement vers son
+  // modèle multimodal courant — pas besoin de les redécouvrir à chaque
+  // appel pour rester à jour. "pixtral-large-latest" a été retiré (modèle
+  // abandonné par Mistral) : on démarre directement sur mistral-medium-latest.
+  const MISTRAL_MODELS = ['mistral-medium-latest', 'mistral-small-latest'];
 
   async function callOneMistralModel(model, promptText, imageDataUrl, apiKey, timeoutMs){
     const controller = new AbortController();
@@ -1561,7 +1515,17 @@ async function markBottleUsedFromSuggestion(id, btnEl){
         if (code === 404) throw new ModelUnavailableError(message);
         if (code === 401 || code === 403) throw new NonRetryableAIError('Clé IA de secours invalide ou refusée : ' + message);
         if (code === 400) throw new ModelUnavailableError(message); // souvent : ce modèle ne supporte pas ce type de contenu
-        throw new Error(message); // 429 / 503 : potentiellement transitoire
+        if (code === 429){
+          // Limite de débit : une info précieuse arrive parfois dans l'en-tête
+          // Retry-After (secondes à attendre). On l'attache à l'erreur pour
+          // que l'appelant attende le bon délai plutôt que de retenter à l'aveugle.
+          const retryAfterHeader = response.headers.get('retry-after');
+          const retrySec = retryAfterHeader ? parseFloat(retryAfterHeader) : NaN;
+          const err = new Error(message || 'Limite de débit atteinte (palier gratuit)');
+          err.retryAfterMs = !isNaN(retrySec) ? Math.min(Math.max(retrySec, 1), 15) * 1000 : 4000;
+          throw err;
+        }
+        throw new Error(message); // 503 et autres : potentiellement transitoire
       }
 
       const choice = data.choices && data.choices[0];
@@ -1583,23 +1547,28 @@ async function markBottleUsedFromSuggestion(id, btnEl){
     }
   }
 
+  // Une limite de débit (429) s'applique presque toujours à l'ensemble du
+  // compte, pas à un modèle précis : changer de modèle après un 429 ne sert
+  // donc à rien, contrairement à un 404 (ce modèle précis n'existe pas).
+  // La seule chose qui aide vraiment est d'ATTENDRE — d'où cette boucle qui
+  // respecte le délai suggéré par Mistral (ou 4s par défaut) avant de
+  // retenter, au lieu d'enchaîner les appels et d'aggraver la limitation.
   async function callMistralJSON(promptText, imageDataUrl){
     const apiKey = localStorage.getItem('mistral_api_key');
     if (!apiKey) throw new Error('Clé IA de secours manquante');
 
-    const models = await getMistralModelCandidates(apiKey, !!imageDataUrl);
     let lastErr = new Error('IA de secours indisponible');
+    let modelIndex = 0;
 
-    for (let pass = 0; pass < 2; pass++){
-      for (const model of models){
-        try {
-          return await callOneMistralModel(model, promptText, imageDataUrl, apiKey, 15000);
-        } catch(e){
-          if (e instanceof NonRetryableAIError) throw e;
-          lastErr = e;
-          if (e instanceof ModelUnavailableError) continue;
-          if (pass > 0) await new Promise(r => setTimeout(r, 600));
-        }
+    for (let attempt = 0; attempt < 3; attempt++){
+      const model = MISTRAL_MODELS[modelIndex % MISTRAL_MODELS.length];
+      try {
+        return await callOneMistralModel(model, promptText, imageDataUrl, apiKey, 15000);
+      } catch(e){
+        if (e instanceof NonRetryableAIError) throw e;
+        lastErr = e;
+        if (e instanceof ModelUnavailableError){ modelIndex++; continue; } // ce modèle n'existe pas : suivant sans délai
+        if (attempt < 2) await new Promise(r => setTimeout(r, e.retryAfterMs || 4000));
       }
     }
     throw lastErr;
@@ -1682,7 +1651,7 @@ Pour "criteres" : base-toi sur ton expertise du style/appellation/cépage identi
       if (storeDataUrl) document.getElementById('imageUrlInput').value = storeDataUrl;
       updateRetryButtonVisibility();
 
-      const parsed = await withTimeout(callAIJSON(AI_LABEL_PROMPT, analysisDataUrl), 45000, "L'IA met trop de temps à répondre");
+      const parsed = await withTimeout(callAIJSON(AI_LABEL_PROMPT, analysisDataUrl), 65000, "L'IA met trop de temps à répondre");
 
       document.getElementById('nameInput').value = parsed.nom || '';
       document.getElementById('catInput').value = parsed.categorie || '';
