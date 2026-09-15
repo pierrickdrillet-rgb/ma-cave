@@ -32,6 +32,7 @@
   .loader{ border:2.5px solid rgba(201,161,90,0.25); border-bottom-color:var(--gold); border-radius:50%; display:inline-block; box-sizing:border-box; animation:rot 0.9s linear infinite; }
   @keyframes rot{ to{ transform:rotate(360deg);} }
   .line-clamp-2{ display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
+  .line-clamp-3{ display:-webkit-box; -webkit-line-clamp:3; -webkit-box-orient:vertical; overflow:hidden; }
   input:focus, select:focus, textarea:focus{ outline:none; }
 </style>
 </head>
@@ -121,13 +122,25 @@
 
         <div>
           <label class="block text-[13px] font-medium mb-1" style="color:var(--muted)">Catégorie</label>
-          <select id="catInput" required class="w-full rounded-xl px-3 py-2.5 text-[14px]" style="background:var(--bg-950);border:1px solid var(--line);color:var(--cream)"></select>
+          <select id="catInput" required onchange="renderScoreInputs()" class="w-full rounded-xl px-3 py-2.5 text-[14px]" style="background:var(--bg-950);border:1px solid var(--line);color:var(--cream)"></select>
           <p class="text-[11.5px] mt-1" style="color:var(--muted)">Sert à filtrer votre cave et à proposer des accords fiables.</p>
         </div>
 
         <div>
           <label class="block text-[13px] font-medium mb-1" style="color:var(--muted)">Détail <span class="font-normal">(facultatif)</span></label>
-          <textarea id="detailInput" rows="2" placeholder="Ex. cépage, appellation, millésime" class="w-full rounded-xl px-3 py-2.5 text-[14px] leading-relaxed" style="background:var(--bg-950);border:1px solid var(--line);color:var(--cream);resize:vertical"></textarea>
+          <textarea id="detailInput" rows="3" placeholder="Ex. cépage, appellation, millésime" class="w-full rounded-xl px-3.5 py-3 text-[15px] leading-relaxed" style="background:var(--bg-950);border:1px solid var(--line);color:var(--cream);resize:vertical"></textarea>
+        </div>
+
+        <div class="p-4 rounded-xl" style="background:var(--bg-950);border:1px solid var(--line)">
+          <div class="flex items-center justify-between mb-1">
+            <label class="text-[13px] font-medium" style="color:var(--gold)">Profil de dégustation <span class="font-normal" style="color:var(--muted)">(facultatif)</span></label>
+          </div>
+          <p class="text-[11.5px] mb-3" style="color:var(--muted)">Sert à comparer vos bouteilles d'un coup d'œil dans la liste.</p>
+          <div id="scoreInputs" class="flex flex-col gap-2.5"></div>
+          <div class="mt-3 pt-3" style="border-top:1px solid var(--line)">
+            <label class="block text-[12.5px] font-medium mb-1" style="color:var(--muted)">Degré <span class="font-normal">(% vol, facultatif)</span></label>
+            <input type="number" id="degreInput" min="0" max="100" step="0.1" placeholder="Ex. 13.5" class="w-28 rounded-xl px-3 py-2 text-[14px]" style="background:var(--bg-900);border:1px solid var(--line);color:var(--cream)">
+          </div>
         </div>
 
         <div class="grid grid-cols-2 gap-3">
@@ -233,6 +246,77 @@
     { key:'sans_alcool', label:'Sans alcool', color:'#5a8a76', emoji:'🍹' },
   ];
   const CAT_BY_KEY = Object.fromEntries(CATEGORIES.map(c => [c.key, c]));
+
+  // Critères de dégustation adaptés à chaque famille — volontairement courts
+  // (2-4 critères) pour rester lisibles en un coup d'œil sur une carte mobile.
+  // Échelle 1 à 5 pour tous, saisie via curseur.
+  const CRITERIA_BY_CATEGORY = {
+    rouge:       [ { key:'fruit', label:'Fruité' }, { key:'acidite', label:'Acidité' }, { key:'tanin', label:'Tanin' }, { key:'puissance', label:'Puissance' } ],
+    blanc:       [ { key:'fruit', label:'Fruité' }, { key:'acidite', label:'Acidité' }, { key:'mineralite', label:'Minéralité' }, { key:'puissance', label:'Puissance' } ],
+    rose:        [ { key:'fruit', label:'Fruité' }, { key:'acidite', label:'Acidité' }, { key:'fraicheur', label:'Fraîcheur' } ],
+    bulles:      [ { key:'fruit', label:'Fruité' }, { key:'acidite', label:'Acidité' }, { key:'effervescence', label:'Effervescence' }, { key:'finesse', label:'Finesse' } ],
+    cuit:        [ { key:'douceur', label:'Douceur' }, { key:'puissance', label:'Puissance' }, { key:'longueur', label:'Longueur' }, { key:'complexite', label:'Complexité' } ],
+    spiritueux:  [ { key:'puissance', label:'Puissance' }, { key:'douceur', label:'Douceur' }, { key:'boise', label:'Boisé' }, { key:'longueur', label:'Longueur en bouche' } ],
+    arrange:     [ { key:'douceur', label:'Douceur' }, { key:'fruit', label:'Fruité' }, { key:'puissance', label:'Puissance' }, { key:'originalite', label:'Originalité' } ],
+    sans_alcool: [ { key:'fruit', label:'Fruité' }, { key:'acidite', label:'Acidité' }, { key:'douceur', label:'Douceur' }, { key:'fraicheur', label:'Fraîcheur' } ],
+  };
+
+  function renderScoreInputs(existingScores){
+    const wrap = document.getElementById('scoreInputs');
+    if (!wrap) return;
+    const cat = document.getElementById('catInput').value;
+    const criteria = CRITERIA_BY_CATEGORY[cat] || [];
+    const scores = existingScores || {};
+
+    if (!criteria.length){
+      wrap.innerHTML = `<p class="text-[12px]" style="color:var(--muted)">Choisissez une catégorie pour afficher les critères adaptés.</p>`;
+      return;
+    }
+
+    wrap.innerHTML = criteria.map(c => {
+      const val = Math.min(5, Math.max(1, parseInt(scores[c.key]) || 3));
+      return `
+        <div class="flex items-center gap-3">
+          <label class="text-[12.5px] w-[92px] shrink-0" style="color:var(--cream)">${esc(c.label)}</label>
+          <input type="range" min="1" max="5" step="1" value="${val}" data-score-key="${c.key}"
+            oninput="this.nextElementSibling.textContent=this.value"
+            class="flex-1 accent-current" style="accent-color:var(--gold)">
+          <span class="text-[12.5px] w-3 text-right font-semibold" style="color:var(--gold)">${val}</span>
+        </div>`;
+    }).join('');
+  }
+
+  function collectScoreInputs(){
+    const wrap = document.getElementById('scoreInputs');
+    if (!wrap) return {};
+    const scores = {};
+    wrap.querySelectorAll('input[data-score-key]').forEach(input => {
+      scores[input.dataset.scoreKey] = parseInt(input.value) || 3;
+    });
+    return scores;
+  }
+
+  function scoreBarsHtml(b){
+    const criteria = CRITERIA_BY_CATEGORY[b.category] || [];
+    if (!criteria.length || !b.scores) return '';
+    const cat = CAT_BY_KEY[b.category];
+    const color = cat ? cat.color : '#c9a15a';
+    const rows = criteria
+      .filter(c => b.scores[c.key])
+      .map(c => {
+        const val = Math.min(5, Math.max(1, parseInt(b.scores[c.key]) || 0));
+        const pct = (val / 5) * 100;
+        return `
+          <div class="flex items-center gap-2">
+            <span class="text-[10px] w-[68px] shrink-0 truncate" style="color:var(--muted)">${esc(c.label)}</span>
+            <div class="flex-1 h-[5px] rounded-full overflow-hidden" style="background:var(--bg-950)">
+              <div class="h-full rounded-full" style="width:${pct}%;background:${color}"></div>
+            </div>
+          </div>`;
+      }).join('');
+    return rows ? `<div class="flex flex-col gap-1.5 mt-2">${rows}</div>` : '';
+  }
+
 
   const DISH_CHIPS = [
     { label:'🥩 Viande rouge', text:'viande rouge' },
@@ -442,6 +526,7 @@
     t.style.position = 'fixed'; t.style.left = '50%'; t.style.bottom = '24px'; t.style.transform = 'translateX(-50%)';
     t.style.padding = '10px 18px'; t.style.borderRadius = '999px'; t.style.fontSize = '13px'; t.style.fontWeight = '500';
     t.style.zIndex = '200'; t.style.transition = 'opacity .3s'; t.style.boxShadow = '0 10px 30px rgba(0,0,0,.4)';
+    t.style.pointerEvents = 'none'; // purement informatif : ne doit jamais intercepter un clic destiné à un élément en dessous
     t.style.background = type === 'error' ? '#9f2d3f' : '#3f6b52';
     t.style.color = '#f2ece2';
     t.style.opacity = '1';
@@ -986,11 +1071,13 @@ async function markBottleUsedFromSuggestion(id, btnEl){
               ${b.subtype ? `<span class="text-[10px] font-bold tracking-wide px-1.5 py-0.5 rounded shrink-0" style="background:${cat.color}2e;color:${cat.color}">${esc(b.subtype.toUpperCase())}</span>` : ''}
               <h3 class="font-serif-display text-[16px] font-semibold truncate" style="color:var(--cream)">${esc(b.name)}</h3>
             </div>
-            ${b.detail ? `<p class="text-[12px] mt-0.5 leading-relaxed line-clamp-2" style="color:var(--muted)">${esc(b.detail)}</p>` : ''}
+            ${b.detail ? `<p class="text-[13px] mt-1 leading-relaxed line-clamp-3" style="color:#cabcae">${esc(b.detail)}</p>` : ''}
             <div class="flex items-center gap-2 mt-1 flex-wrap">
               <span class="text-[11px] px-2 py-0.5 rounded-full" style="${statusStyle}">${b.status}</span>
               ${b.price ? `<span class="text-[11px]" style="color:var(--gold)">${esc(b.price)}</span>` : ''}
+              ${b.degree ? `<span class="text-[11px]" style="color:var(--muted)">${esc(b.degree)}% vol</span>` : ''}
             </div>
+            ${scoreBarsHtml(b)}
             ${b.notes ? `<p class="text-[12px] italic mt-1.5 leading-relaxed line-clamp-2" style="color:#cabcae">${esc(b.notes)}</p>` : ''}
           </div>
           <div class="flex flex-col items-end gap-2 shrink-0">
@@ -1054,11 +1141,14 @@ async function markBottleUsedFromSuggestion(id, btnEl){
       document.getElementById('priceInput').value = b.price || '';
       document.getElementById('notesInput').value = b.notes || '';
       document.getElementById('imageUrlInput').value = b.image || '';
+      document.getElementById('degreInput').value = b.degree || '';
+      renderScoreInputs(b.scores || {});
     } else {
       document.getElementById('modalTitle').textContent = 'Ajouter une bouteille';
       document.getElementById('bottleForm').reset();
       document.getElementById('bottleId').value = '';
       document.getElementById('imageUrlInput').value = '';
+      renderScoreInputs({});
     }
     updateRetryButtonVisibility();
   }
@@ -1130,6 +1220,8 @@ async function markBottleUsedFromSuggestion(id, btnEl){
       status: document.getElementById('statusInput').value,
       price: document.getElementById('priceInput').value.trim(),
       notes: document.getElementById('notesInput').value.trim(),
+      degree: document.getElementById('degreInput').value.trim(),
+      scores: collectScoreInputs(),
       image: document.getElementById('imageUrlInput').value,
       updatedAt: Date.now()
     };
@@ -1532,7 +1624,7 @@ async function markBottleUsedFromSuggestion(id, btnEl){
       try {
         return await callGeminiJSON(parts);
       } catch(e){
-        if (!mistralKey) throw e;
+        if (!mistralKey) throw new Error(`${e.message || 'Échec Gemini'} (aucune clé de secours Mistral enregistrée dans les réglages)`);
         console.warn('Gemini indisponible, bascule sur le fournisseur de secours (Mistral)', e);
         try {
           return await callMistralJSON(promptText, imageDataUrl);
