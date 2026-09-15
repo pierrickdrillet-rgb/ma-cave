@@ -166,7 +166,7 @@
 
         <div>
           <label class="block text-[13px] font-medium mb-1" style="color:var(--muted)">Notes de dégustation <span class="font-normal">(facultatif)</span></label>
-          <textarea id="notesInput" rows="2" placeholder="Ex. idéal avec un plat mijoté…" class="w-full rounded-xl px-3 py-2 text-[14px]" style="background:var(--bg-950);border:1px solid var(--line);color:var(--cream)"></textarea>
+          <textarea id="notesInput" rows="3" placeholder="Ex. idéal avec un plat mijoté…" class="w-full rounded-xl px-3.5 py-3 text-[15px] leading-relaxed" style="background:var(--bg-950);border:1px solid var(--line);color:var(--cream);resize:vertical"></textarea>
         </div>
         <input type="hidden" id="imageUrlInput">
 
@@ -1654,9 +1654,16 @@ Renvoie UNIQUEMENT un objet JSON valide avec cette structure exacte, sans aucun 
   "type": "Type précis et court, affiché en badge (ex: Gin, Rhum, Whisky, Vodka, Cognac, Limoncello, Bordeaux, Champagne...)",
   "detail": "Appellation, cépage, millésime",
   "prix": "Estimation du prix moyen en euros (ex: 15€ - 20€)",
+  "degre": "Degré d'alcool en pourcentage, nombre seul sans le symbole % (ex: 13.5). Laisse vide si vraiment illisible ou inconnu.",
+  "criteres": {
+    "fruit": "1 à 5", "acidite": "1 à 5", "tanin": "1 à 5", "puissance": "1 à 5",
+    "mineralite": "1 à 5", "fraicheur": "1 à 5", "effervescence": "1 à 5", "finesse": "1 à 5",
+    "douceur": "1 à 5", "longueur": "1 à 5", "complexite": "1 à 5", "boise": "1 à 5", "originalite": "1 à 5"
+  },
   "notes": "Courte note de dégustation. Propose un accord avec une cuisine semi-gastronomique simple. Si c'est un vin rouge, oriente vers des plats épicés. Si c'est un rhum/vin cuit, oriente vers un dessert fort en chocolat. Adapte tes suggestions pour qu'elles puissent se décliner facilement pour un enfant. IMPORTANT : Ne propose JAMAIS d'accords contenant des champignons."
 }
-Utilise "arrange" pour tout spiritueux infusé, aromatisé ou fruit macéré dans l'alcool : rhum ou whisky arrangé, limoncello, cognac au citron, cerises à l'eau de vie, liqueur artisanale, etc. — jamais pour un spiritueux classique.`;
+Utilise "arrange" pour tout spiritueux infusé, aromatisé ou fruit macéré dans l'alcool : rhum ou whisky arrangé, limoncello, cognac au citron, cerises à l'eau de vie, liqueur artisanale, etc. — jamais pour un spiritueux classique.
+Pour "criteres" : base-toi sur ton expertise du style/appellation/cépage identifié pour estimer chaque note, MAIS n'inclus dans l'objet que les critères réellement pertinents pour cette catégorie précise de boisson (par exemple : pas de "tanin" ni "mineralite" pour un rhum, pas d'"effervescence" pour un vin tranquille). Omets entièrement les critères non pertinents plutôt que de mettre une valeur par défaut.`;
 
   async function runAiAnalysis(analysisDataUrl, storeDataUrl){
     const feedback = document.getElementById('aiFeedback');
@@ -1682,7 +1689,9 @@ Utilise "arrange" pour tout spiritueux infusé, aromatisé ou fruit macéré dan
       document.getElementById('subtypeInput').value = parsed.type || '';
       document.getElementById('detailInput').value = parsed.detail || '';
       document.getElementById('priceInput').value = parsed.prix || '';
+      document.getElementById('degreInput').value = parsed.degre || '';
       document.getElementById('notesInput').value = parsed.notes || '';
+      renderScoreInputs(parsed.criteres || {});
 
       feedback.innerHTML = `<span style="color:#7fbf9c">✅ Bouteille identifiée avec succès par l'IA ! Vérifiez les informations.</span>`;
 
