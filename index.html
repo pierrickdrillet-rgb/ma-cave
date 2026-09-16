@@ -1685,71 +1685,70 @@ async function markBottleUsedFromSuggestion(id, btnEl){
     return OPENROUTER_FALLBACK_MODELS;
   }
 
-  async function callOneOpenRouterModel(model, promptText, imageDataUrl, apiKey, timeoutMs){
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
-    try {
-      const content = imageDataUrl
-        ? [{ type: 'text', text: promptText }, { type: 'image_url', image_url: { url: imageDataUrl } }]
-        : promptText;
+async function callOneOpenRouterModel(model, promptText, imageDataUrl, apiKey, timeoutMs){
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const content = imageDataUrl
+      ? [{ type: 'text', text: promptText }, { type: 'image_url', image_url: { url: imageDataUrl } }]
+      : promptText;
 
-      const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: 'Bearer ' + apiKey,
-          // Identifie l'app auprès d'OpenRouter (recommandé, sans effet sur le prix).
-          'HTTP-Referer': location.origin || 'https://ma-cave.local',
-          'X-Title': 'Ma Cave'
-        },
-        signal: controller.signal,
-        body: JSON.stringify({
-          model,
-          messages: [{ role: 'user', content }],
-          max_tokens: 1500
-        })
-      });
+    const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: 'Bearer ' + apiKey,
+        'HTTP-Referer': location.origin || 'https://ma-cave.local',
+        'X-Title': 'Ma Cave'
+      },
+      signal: controller.signal,
+      body: JSON.stringify({
+        model,
+        messages: [{ role: 'user', content }],
+        max_tokens: 1500
+      })
+    });
 
-      let data;
-      try { data = await response.json(); }
-      catch(e){ throw new Error('Réponse invalide du serveur IA (secours)'); }
+    let data;
+    try { data = await response.json(); }
+    catch(e){ throw new Error(`Réponse invalide du serveur IA (secours, modèle ${model})`); }
 
-      if (!response.ok || data.error){
-        const code = (data.error && data.error.code) || response.status;
-        const message = (data.error && (data.error.message || data.error)) || `Erreur HTTP ${response.status}`;
-        if (code === 404) throw new ModelUnavailableError(message);
-        if (code === 401 || code === 403) throw new NonRetryableAIError('Clé IA de secours invalide ou refusée : ' + message);
-        // 400 sur OpenRouter = souvent un modèle qui n'accepte pas l'image
-        // envoyée : on passe au candidat suivant plutôt que d'abandonner.
-        if (code === 400) throw new ModelUnavailableError(message);
-        if (code === 429){
-          const retryAfterHeader = response.headers.get('retry-after');
-          const retrySec = retryAfterHeader ? parseFloat(retryAfterHeader) : NaN;
-          const err = new Error(message || 'Limite de requêtes atteinte (modèles gratuits)');
-          err.retryAfterMs = !isNaN(retrySec) ? Math.min(Math.max(retrySec, 1), 15) * 1000 : 5000;
-          throw err;
-        }
-        throw new Error(message); // 502/503 : capacité gratuite momentanément saturée
+    if (!response.ok || data.error){
+      const code = (data.error && data.error.code) || response.status;
+      const message = (data.error && (data.error.message || data.error)) || `Erreur HTTP ${response.status}`;
+      // 402 = crédit insuffisant / modèle payant sélectionné par erreur : inutile de
+      // retenter le même modèle, mais on peut essayer un AUTRE modèle gratuit.
+      if (code === 402) throw new ModelUnavailableError(`Modèle payant ou crédit épuisé (${model}) : ${message}`);
+      if (code === 404) throw new ModelUnavailableError(`${model} : ${message}`);
+      if (code === 401 || code === 403) throw new NonRetryableAIError('Clé IA de secours invalide ou refusée : ' + message);
+      if (code === 400) throw new ModelUnavailableError(`${model} : ${message}`);
+      if (code === 429){
+        const retryAfterHeader = response.headers.get('retry-after');
+        const retrySec = retryAfterHeader ? parseFloat(retryAfterHeader) : NaN;
+        const err = new Error(`${model} : limite de requêtes atteinte (modèles gratuits)`);
+        err.retryAfterMs = !isNaN(retrySec) ? Math.min(Math.max(retrySec, 1), 15) * 1000 : 5000;
+        throw err;
       }
-
-      const choice = data.choices && data.choices[0];
-      let text = choice && choice.message && choice.message.content;
-      if (!text) throw new Error("Réponse vide de l'IA de secours");
-      text = String(text).trim().replace(/^```json\s*/i, '').replace(/^```\s*/, '').replace(/```\s*$/, '').trim();
-      try { return JSON.parse(text); }
-      catch(e){
-        // Les modèles gratuits ajoutent parfois du texte autour du JSON.
-        const match = text.match(/\{[\s\S]*\}/);
-        if (match){ try { return JSON.parse(match[0]); } catch(e2){} }
-        throw new Error("Réponse IA de secours mal formée (JSON invalide)");
-      }
-    } catch(e){
-      if (e.name === 'AbortError') throw new Error('Délai dépassé pour ce modèle de secours');
-      throw e;
-    } finally {
-      clearTimeout(timeoutId);
+      throw new Error(`${model} : ${message}`); // 502/503 : capacité gratuite momentanément saturée
     }
+
+    const choice = data.choices && data.choices[0];
+    let text = choice && choice.message && choice.message.content;
+    if (!text) throw new Error(`Réponse vide de l'IA de secours (${model})`);
+    text = String(text).trim().replace(/^```json\s*/i, '').replace(/^```\s*/, '').replace(/```\s*$/, '').trim();
+    try { return JSON.parse(text); }
+    catch(e){
+      const match = text.match(/\{[\s\S]*\}/);
+      if (match){ try { return JSON.parse(match[0]); } catch(e2){} }
+      throw new Error(`Réponse IA de secours mal formée (${model})`);
+    }
+  } catch(e){
+    if (e.name === 'AbortError') throw new Error(`Délai dépassé pour ${model}`);
+    throw e;
+  } finally {
+    clearTimeout(timeoutId);
   }
+}
 
   // Un 404/400 vise un modèle précis → on passe au suivant sans attendre.
   // Un 429 vise le compte entier → changer de modèle ne sert à rien, il faut
