@@ -132,10 +132,15 @@
         </div>
 
         <div class="p-4 rounded-xl" style="background:var(--bg-950);border:1px solid var(--line)">
-          <div class="flex items-center justify-between mb-1">
-            <label class="text-[13px] font-medium" style="color:var(--gold)">Profil de dégustation <span class="font-normal" style="color:var(--muted)">(facultatif)</span></label>
+          <div class="flex items-center justify-between gap-2 mb-1">
+            <label class="text-[13px] font-medium" style="color:var(--gold)">Profil de dégustation</label>
+            <button type="button" onclick="toggleProfileHelp(this)" class="text-[11.5px] px-2 py-1 rounded-full shrink-0" style="border:1px solid var(--line);color:var(--muted)">Comment ça marche ?</button>
           </div>
-          <p class="text-[11.5px] mb-3" style="color:var(--muted)">Sert à comparer vos bouteilles d'un coup d'œil dans la liste.</p>
+          <div id="profileHelp" class="hidden text-[11.5px] leading-relaxed mb-3 rounded-lg px-3 py-2.5" style="background:var(--bg-900);border:1px solid var(--line);color:var(--muted)">
+            Notez chaque critère de 1 à 5 en bougeant le curseur. Les critères changent selon la catégorie — et le whisky débloque même un curseur « Tourbé » 🔥<br><br>
+            Un critère que vous ne touchez pas reste « non noté » et n'apparaîtra pas sur la fiche : mieux vaut trois notes sûres que six approximatives. Vous pouvez aussi laisser l'IA les proposer depuis une photo, puis corriger ce qui vous semble à côté — c'est votre palais qui tranche.
+          </div>
+          <p class="text-[11.5px] mb-3" style="color:var(--muted)">Pour comparer vos bouteilles d'un coup d'œil dans la liste.</p>
           <div id="scoreInputs" class="flex flex-col gap-2.5"></div>
           <div class="mt-3 pt-3" style="border-top:1px solid var(--line)">
             <label class="block text-[12.5px] font-medium mb-1" style="color:var(--muted)">Degré <span class="font-normal">(% vol, facultatif)</span></label>
@@ -206,12 +211,12 @@
       </div>
 
       <div class="mb-5 p-4 rounded-xl" style="background:var(--bg-950);border:1px solid var(--line)">
-        <label class="block text-[13px] font-medium mb-2" style="color:var(--gold)">Clé IA de secours (Mistral) <span class="font-normal" style="color:var(--muted)">— optionnel</span></label>
+        <label class="block text-[13px] font-medium mb-2" style="color:var(--gold)">Clé IA de secours (OpenRouter) <span class="font-normal" style="color:var(--muted)">— optionnel</span></label>
         <div class="flex gap-2">
-          <input type="password" id="mistralKeyInput" autocomplete="off" placeholder="Clé de La Plateforme Mistral" class="flex-1 rounded-xl px-3 py-2 text-[13px]" style="background:var(--bg-900);border:1px solid var(--line);color:var(--cream)">
-          <button onclick="saveMistralKey()" class="rounded-xl px-3 py-2 text-[13px] font-medium" style="background:var(--gold);color:var(--bg-950)">Sauver</button>
+          <input type="password" id="openrouterKeyInput" autocomplete="off" placeholder="Clé commençant par sk-or-..." class="flex-1 rounded-xl px-3 py-2 text-[13px]" style="background:var(--bg-900);border:1px solid var(--line);color:var(--cream)">
+          <button onclick="saveOpenRouterKey()" class="rounded-xl px-3 py-2 text-[13px] font-medium" style="background:var(--gold);color:var(--bg-950)">Sauver</button>
         </div>
-        <p class="text-[11px] mt-2" style="color:var(--muted)">Utilisée automatiquement si Gemini échoue (quota épuisé, panne…) — via le palier gratuit "Experiment" de <a href="https://console.mistral.ai/api-keys" target="_blank" rel="noopener" style="color:var(--gold);text-decoration:underline">La Plateforme Mistral</a>. Stockée uniquement sur cet appareil.</p>
+        <p class="text-[11px] mt-2 leading-relaxed" style="color:var(--muted)">Prend le relais automatiquement quand Gemini est à sec. Compte gratuit sur <a href="https://openrouter.ai/keys" target="_blank" rel="noopener" style="color:var(--gold);text-decoration:underline">openrouter.ai</a> : un email suffit, aucune carte bancaire, aucun crédit à acheter. Stockée uniquement sur cet appareil.</p>
       </div>
 
       <div class="space-y-2.5">
@@ -250,22 +255,41 @@
   // Critères de dégustation adaptés à chaque famille — volontairement courts
   // (2-4 critères) pour rester lisibles en un coup d'œil sur une carte mobile.
   // Échelle 1 à 5 pour tous, saisie via curseur.
+  // "hint" = explication en langage courant (l'utilisateur n'est pas sommelier).
+  // "low"/"high" = ce que valent concrètement 1 et 5, pour savoir quoi noter.
+  const CRITERION_INFO = {
+    fruit:         { label:'Fruité',        hint:"À quel point le goût du fruit saute au nez et en bouche.", low:'discret', high:'très fruité' },
+    acidite:       { label:'Acidité',       hint:"Ce côté vif qui fait saliver, comme un filet de citron.", low:'tout doux', high:'très vif' },
+    tanin:         { label:'Tanin',         hint:"La sensation râpeuse qui assèche la langue, typique des rouges.", low:'soyeux', high:'très tannique' },
+    puissance:     { label:'Puissance',     hint:"L'intensité générale : ça vous remplit la bouche ou ça reste léger ?", low:'léger', high:'costaud' },
+    mineralite:    { label:'Minéralité',    hint:"Le côté pierre à fusil, craie, eau de source. Fréquent sur les blancs secs.", low:'absente', high:'très minéral' },
+    fraicheur:     { label:'Fraîcheur',     hint:"L'effet désaltérant, celui qui donne envie d'un deuxième verre en terrasse.", low:'lourd', high:'très rafraîchissant' },
+    effervescence: { label:'Effervescence', hint:"La bulle : fine et discrète, ou franchement pétillante ?", low:'perlant', high:'très pétillant' },
+    finesse:       { label:'Finesse',       hint:"L'élégance de l'ensemble, par opposition à quelque chose de rustique.", low:'rustique', high:'très fin' },
+    douceur:       { label:'Douceur',       hint:"La sensation sucrée en bouche.", low:'très sec', high:'très sucré' },
+    longueur:      { label:'Longueur',      hint:"Combien de temps le goût reste après avoir avalé.", low:'court', high:'très long' },
+    complexite:    { label:'Complexité',    hint:"Le nombre d'arômes différents qu'on arrive à distinguer.", low:'simple', high:'très complexe' },
+    boise:         { label:'Boisé',         hint:"Le goût apporté par le fût : vanille, caramel, noix de coco, fumé.", low:'aucun', high:'très boisé' },
+    originalite:   { label:'Originalité',   hint:"À quel point ça sort de l'ordinaire — utile pour vos préparations maison.", low:'classique', high:'surprenant' },
+    tourbe:        { label:'Tourbé',        hint:"Le fumé médicinal/iodé des whiskys d'Islay. Absent des whiskys non tourbés.", low:'à peine', high:'très tourbé' },
+  };
+
   const CRITERIA_BY_CATEGORY = {
-    rouge:       [ { key:'fruit', label:'Fruité' }, { key:'acidite', label:'Acidité' }, { key:'tanin', label:'Tanin' }, { key:'puissance', label:'Puissance' } ],
-    blanc:       [ { key:'fruit', label:'Fruité' }, { key:'acidite', label:'Acidité' }, { key:'mineralite', label:'Minéralité' }, { key:'puissance', label:'Puissance' } ],
-    rose:        [ { key:'fruit', label:'Fruité' }, { key:'acidite', label:'Acidité' }, { key:'fraicheur', label:'Fraîcheur' } ],
-    bulles:      [ { key:'fruit', label:'Fruité' }, { key:'acidite', label:'Acidité' }, { key:'effervescence', label:'Effervescence' }, { key:'finesse', label:'Finesse' } ],
-    cuit:        [ { key:'douceur', label:'Douceur' }, { key:'puissance', label:'Puissance' }, { key:'longueur', label:'Longueur' }, { key:'complexite', label:'Complexité' } ],
-    spiritueux:  [ { key:'puissance', label:'Puissance' }, { key:'douceur', label:'Douceur' }, { key:'boise', label:'Boisé' }, { key:'longueur', label:'Longueur en bouche' } ],
-    arrange:     [ { key:'douceur', label:'Douceur' }, { key:'fruit', label:'Fruité' }, { key:'puissance', label:'Puissance' }, { key:'originalite', label:'Originalité' } ],
-    sans_alcool: [ { key:'fruit', label:'Fruité' }, { key:'acidite', label:'Acidité' }, { key:'douceur', label:'Douceur' }, { key:'fraicheur', label:'Fraîcheur' } ],
+    rouge:       ['fruit', 'acidite', 'tanin', 'puissance'],
+    blanc:       ['fruit', 'acidite', 'mineralite', 'puissance'],
+    rose:        ['fruit', 'acidite', 'fraicheur'],
+    bulles:      ['fruit', 'acidite', 'effervescence', 'finesse'],
+    cuit:        ['douceur', 'puissance', 'longueur', 'complexite'],
+    spiritueux:  ['puissance', 'douceur', 'boise', 'longueur'],
+    arrange:     ['douceur', 'fruit', 'puissance', 'originalite'],
+    sans_alcool: ['fruit', 'acidite', 'douceur', 'fraicheur'],
   };
 
   // Critères supplémentaires propres à un type précis (badge "Type précis"),
   // qui s'ajoutent aux critères de la catégorie plutôt que de les remplacer —
   // ex. "Tourbé" n'a de sens que pour un whisky, pas pour un spiritueux en général.
   const EXTRA_CRITERIA_BY_SUBTYPE = [
-    { match: /whisky|whiskey/, criteria: [ { key:'tourbe', label:'Tourbé' } ] },
+    { match: /whisky|whiskey/, keys: ['tourbe'] },
   ];
 
   function getCriteriaFor(category, subtype){
@@ -273,9 +297,15 @@
     const normSub = normalize(subtype || '');
     const extras = EXTRA_CRITERIA_BY_SUBTYPE
       .filter(entry => entry.match.test(normSub))
-      .flatMap(entry => entry.criteria);
-    return [...base, ...extras];
+      .flatMap(entry => entry.keys);
+    return [...base, ...extras]
+      .filter((key, i, arr) => arr.indexOf(key) === i)
+      .map(key => ({ key, ...CRITERION_INFO[key] }))
+      .filter(c => c.label);
   }
+
+  // Un mot vaut mieux qu'un chiffre nu : "3" ne dit rien, "moyen" si.
+  const SCALE_WORDS = ['', 'très faible', 'faible', 'moyen', 'élevé', 'très élevé'];
 
   function renderScoreInputs(existingScores){
     const wrap = document.getElementById('scoreInputs');
@@ -286,21 +316,49 @@
     const scores = existingScores || {};
 
     if (!criteria.length){
-      wrap.innerHTML = `<p class="text-[12px]" style="color:var(--muted)">Choisissez une catégorie pour afficher les critères adaptés.</p>`;
+      wrap.innerHTML = `<p class="text-[12.5px] leading-relaxed" style="color:var(--muted)">Choisissez d'abord une catégorie : les critères s'adaptent tout seuls (un rouge n'a pas les mêmes que le rhum 🥃).</p>`;
       return;
     }
 
     wrap.innerHTML = criteria.map(c => {
-      const val = Math.min(5, Math.max(1, parseInt(scores[c.key]) || 3));
+      const has = scores[c.key] !== undefined && scores[c.key] !== null && scores[c.key] !== '';
+      const val = has ? Math.min(5, Math.max(1, parseInt(scores[c.key]) || 3)) : 3;
       return `
-        <div class="flex items-center gap-3">
-          <label class="text-[12.5px] w-[92px] shrink-0" style="color:var(--cream)">${esc(c.label)}</label>
-          <input type="range" min="1" max="5" step="1" value="${val}" data-score-key="${c.key}"
-            oninput="this.nextElementSibling.textContent=this.value"
-            class="flex-1 accent-current" style="accent-color:var(--gold)">
-          <span class="text-[12.5px] w-3 text-right font-semibold" style="color:var(--gold)">${val}</span>
+        <div class="rounded-lg px-3 py-2.5" style="background:var(--bg-900);border:1px solid var(--line)" data-criterion="${c.key}">
+          <div class="flex items-baseline justify-between gap-2">
+            <span class="text-[13px] font-medium" style="color:var(--cream)">${esc(c.label)}</span>
+            <span class="text-[12px] font-semibold shrink-0" data-score-word style="color:${has ? 'var(--gold)' : 'var(--muted)'}">${has ? esc(SCALE_WORDS[val]) : 'non noté'}</span>
+          </div>
+          <p class="text-[11px] mt-0.5 mb-2 leading-snug" style="color:var(--muted)">${esc(c.hint)}</p>
+          <input type="range" min="1" max="5" step="1" value="${val}" data-score-key="${c.key}" data-set="${has ? '1' : '0'}"
+            oninput="onScoreSlide(this)"
+            class="w-full" style="accent-color:var(--gold)">
+          <div class="flex justify-between mt-0.5">
+            <span class="text-[10px]" style="color:var(--muted)">${esc(c.low)}</span>
+            <span class="text-[10px]" style="color:var(--muted)">${esc(c.high)}</span>
+          </div>
         </div>`;
     }).join('');
+  }
+
+  // Un critère ne compte que si on l'a réellement touché (ou si l'IA l'a rempli) :
+  // ça évite de noter "3 partout" par défaut et de polluer les comparaisons.
+  function onScoreSlide(input){
+    input.dataset.set = '1';
+    const box = input.closest('[data-criterion]');
+    const word = box && box.querySelector('[data-score-word]');
+    if (word){
+      word.textContent = SCALE_WORDS[parseInt(input.value)] || '';
+      word.style.color = 'var(--gold)';
+    }
+  }
+
+  function toggleProfileHelp(btn){
+    const el = document.getElementById('profileHelp');
+    if (!el) return;
+    const opening = el.classList.contains('hidden');
+    el.classList.toggle('hidden', !opening);
+    btn.textContent = opening ? 'Masquer' : 'Comment ça marche ?';
   }
 
   function collectScoreInputs(){
@@ -308,7 +366,7 @@
     if (!wrap) return {};
     const scores = {};
     wrap.querySelectorAll('input[data-score-key]').forEach(input => {
-      scores[input.dataset.scoreKey] = parseInt(input.value) || 3;
+      if (input.dataset.set === '1') scores[input.dataset.scoreKey] = parseInt(input.value) || 3;
     });
     return scores;
   }
@@ -322,13 +380,16 @@
       .filter(c => b.scores[c.key])
       .map(c => {
         const val = Math.min(5, Math.max(1, parseInt(b.scores[c.key]) || 0));
-        const pct = (val / 5) * 100;
+        // 5 segments plutôt qu'une barre continue : on lit la note d'un coup
+        // d'œil sans avoir à estimer une longueur.
+        const segments = [1,2,3,4,5].map(i =>
+          `<span class="flex-1 h-[6px] rounded-sm" style="background:${i <= val ? color : 'rgba(255,255,255,0.07)'}"></span>`
+        ).join('');
+        const tip = `${c.label} : ${SCALE_WORDS[val]} (${val}/5) — ${c.hint}`;
         return `
-          <div class="flex items-center gap-2">
-            <span class="text-[10px] w-[68px] shrink-0 truncate" style="color:var(--muted)">${esc(c.label)}</span>
-            <div class="flex-1 h-[5px] rounded-full overflow-hidden" style="background:var(--bg-950)">
-              <div class="h-full rounded-full" style="width:${pct}%;background:${color}"></div>
-            </div>
+          <div class="flex items-center gap-2" title="${esc(tip)}">
+            <span class="text-[10.5px] w-[74px] shrink-0 truncate" style="color:var(--muted)">${esc(c.label)}</span>
+            <span class="flex-1 flex gap-[3px]">${segments}</span>
           </div>`;
       }).join('');
     return rows ? `<div class="flex flex-col gap-1.5 mt-2">${rows}</div>` : '';
@@ -922,7 +983,7 @@
       html += `<p class="text-[13px]" style="color:var(--muted)">Votre cave est vide pour l'instant — ajoutez quelques bouteilles pour recevoir des suggestions.</p>`;
     }
 
-    if ((localStorage.getItem('gemini_api_key') || localStorage.getItem('mistral_api_key')) && inStock.length > 0){
+    if ((localStorage.getItem('gemini_api_key') || localStorage.getItem('openrouter_api_key')) && inStock.length > 0){
       html += `<div class="mt-3 pt-3" style="border-top:1px solid var(--line)">
         <button type="button" onclick="refineWithAI()" id="aiPairingBtn" class="text-[12.5px] px-3 py-1.5 rounded-full transition" style="border:1px solid var(--line);color:var(--gold)">🍷 Affiner avec l'IA</button>
         <div id="aiPairingResult" class="mt-2 text-[13px] leading-relaxed"></div>
@@ -948,25 +1009,65 @@
       }
       const list = available.map(b => {
         const cat = CAT_BY_KEY[b.category];
-        return `- ${b.name}${b.detail ? ' (' + b.detail + ')' : ''} [catégorie : ${cat ? cat.label : b.category}, quantité : ${b.qty}]`;
+        const criteria = getCriteriaFor(b.category, b.subtype);
+        // On transmet le profil de dégustation réellement saisi : un accord
+        // fondé sur "tanin 5, puissance 4" est bien plus fiable qu'un accord
+        // deviné à partir du seul nom de la bouteille.
+        const profile = criteria
+          .filter(c => b.scores && b.scores[c.key])
+          .map(c => `${c.label} ${b.scores[c.key]}/5`)
+          .join(', ');
+        const bits = [`catégorie : ${cat ? cat.label : b.category}`, `quantité : ${b.qty}`];
+        if (b.subtype) bits.unshift(`type : ${b.subtype}`);
+        if (b.degree) bits.push(`${b.degree}% vol`);
+        if (profile) bits.push(`profil : ${profile}`);
+        return `- ${b.name}${b.detail ? ' (' + b.detail + ')' : ''} [${bits.join(', ')}]`;
       }).join('\n');
       const prompt = `Tu es un sommelier exigeant et honnête. Plat à accorder : "${lastPairingContext.dish}".
+
 Voici UNIQUEMENT les bouteilles réellement disponibles dans la cave :
 ${list}
-Choisis jusqu'à 3 bouteilles parmi cette liste (jamais une bouteille absente de la liste), classées de la meilleure à la moins bonne pour ce plat.
-Sois honnête : si aucune de ces bouteilles ne fait un VRAI bon accord avec ce plat (juste un pis-aller acceptable), dis-le clairement.
-Réponds UNIQUEMENT en JSON strict, sans texte autour :
-{"reason":"une phrase courte expliquant le choix global","picks":["nom exact du meilleur choix","nom exact du 2e choix","nom exact du 3e choix"],"goodMatch":true ou false selon qu'un accord vraiment réussi est possible avec ce qui est disponible,"shoppingSuggestion":"si goodMatch est false, décris en une phrase le type de bouteille idéal à acheter pour un accord parfait (cépage/appellation/style de vin ou de spiritueux, pas une marque précise) ; sinon chaîne vide"}`;
+
+RÈGLES ABSOLUES :
+1. Ne propose QUE des bouteilles de la liste ci-dessus. N'invente jamais une bouteille, même si elle serait un meilleur accord. Recopie le nom EXACTEMENT tel qu'il est écrit dans la liste, caractère pour caractère.
+2. Appuie ton raisonnement sur les informations fournies (catégorie, type, détail, degré, profil de dégustation quand il est indiqué) plutôt que sur des suppositions. Un profil comme "Tanin 5/5, Puissance 4/5" te dit qu'il s'agit d'un vin structuré, à réserver aux plats de caractère.
+3. Sois honnête, c'est le plus important : si aucune bouteille de cette cave ne fait un VRAI bon accord avec ce plat (juste un pis-aller acceptable), mets "goodMatch": false. Ne force pas un accord flatteur pour faire plaisir.
+4. Classe tes choix du meilleur au moins bon, 3 maximum. S'il n'y a qu'une seule bouteille pertinente, n'en propose qu'une.
+5. Réponds UNIQUEMENT en JSON strict, sans texte autour ni blocs \`\`\`.
+
+Format exact :
+{"reason":"une phrase courte expliquant le choix global","picks":["nom exact du meilleur choix","nom exact du 2e choix"],"goodMatch":true,"shoppingSuggestion":""}
+
+Champ "shoppingSuggestion" : si goodMatch est false, décris en une phrase le type de bouteille idéal à acheter pour un accord parfait (cépage, appellation ou style de vin/spiritueux — jamais une marque précise). Si goodMatch est true, mets une chaîne vide.
+
+Exemple pour un magret de canard, si la cave contenait un Madiran : {"reason":"Les tanins fermes du Madiran tiennent tête au gras du canard sans l'écraser.","picks":["Château Montus"],"goodMatch":true,"shoppingSuggestion":""}`;
       const parsed = await withTimeout(callAIJSON(prompt), 55000, "L'IA met trop de temps à répondre");
       const rawPicks = Array.isArray(parsed.picks) ? parsed.picks.slice(0, 3) : [];
 
+      // Les modèles gratuits sont plus susceptibles d'halluciner une bouteille
+      // absente ou d'écorcher un nom. On ne fait donc confiance qu'à ce qu'on
+      // peut rattacher à une bouteille RÉELLE de la cave, et on exige au moins
+      // 4 caractères avant d'autoriser un rapprochement approximatif — sans
+      // quoi un "vin" ou un "rhum" collerait à n'importe quoi.
       const seen = new Set();
       const pickedBottles = [];
+      let unmatched = 0;
       rawPicks.forEach(name => {
         const norm = normalize(name);
-        const found = available.find(b => normalize(b.name) === norm) ||
-          available.find(b => normalize(b.name).includes(norm) || norm.includes(normalize(b.name)));
+        if (!norm){ unmatched++; return; }
+        let found = available.find(b => normalize(b.name) === norm);
+        if (!found && norm.length >= 4){
+          // En cas de correspondance partielle multiple, on garde la plus
+          // spécifique (le nom le plus long) plutôt que la première trouvée.
+          const partials = available.filter(b => {
+            const bn = normalize(b.name);
+            return bn.length >= 4 && (bn.includes(norm) || norm.includes(bn));
+          });
+          partials.sort((a, b) => normalize(b.name).length - normalize(a.name).length);
+          found = partials[0];
+        }
         if (found && !seen.has(found.id)){ seen.add(found.id); pickedBottles.push(found); }
+        else if (!found) unmatched++;
       });
 
       const rankIcons = ['🥇', '🥈', '🥉'];
@@ -985,7 +1086,14 @@ Réponds UNIQUEMENT en JSON strict, sans texte autour :
           </div>`;
         }).join('') + `</div>`;
       } else if (rawPicks.length){
-        html += `<p class="mt-1" style="color:var(--cream)">${rawPicks.map(esc).join(' · ')}</p>`;
+        // L'IA a répondu, mais aucune de ses suggestions ne correspond à une
+        // bouteille de la cave : on ne les affiche surtout pas comme si vous
+        // les possédiez.
+        html += `<p class="mt-2 text-[12.5px] leading-relaxed" style="color:var(--muted)">L'IA a proposé des bouteilles qui ne figurent pas dans votre cave — suggestion ignorée. Fiez-vous à la liste ci-dessus.</p>`;
+      }
+
+      if (pickedBottles.length && unmatched > 0){
+        html += `<p class="mt-2 text-[11.5px]" style="color:var(--muted)">(${unmatched} suggestion(s) écartée(s) : introuvable(s) dans votre cave.)</p>`;
       }
 
       if (parsed.goodMatch === false && parsed.shoppingSuggestion){
@@ -1050,7 +1158,7 @@ async function markBottleUsedFromSuggestion(id, btnEl){
       empty.innerHTML = `
         <p class="text-4xl mb-3">🍾</p>
         <p class="font-serif-display text-[18px] mb-1">Votre cave est vide</p>
-        <p class="text-[13px] mb-4" style="color:var(--muted)">Ajoutez votre première bouteille pour commencer à suivre votre stock et recevoir des accords.</p>
+        <p class="text-[13px] mb-4 max-w-sm mx-auto leading-relaxed" style="color:var(--muted)">Prenez en photo l'étiquette d'une bouteille : le nom, le type et le profil de dégustation se remplissent presque tout seuls. Vous pouvez aussi tout saisir à la main.</p>
         <button onclick="openModal()" class="inline-flex items-center gap-2 px-5 py-2.5 rounded-full font-medium text-[14px]" style="background:var(--wine);color:var(--cream)">Ajouter ma première bouteille</button>
       `;
       empty.classList.remove('hidden');
@@ -1066,7 +1174,9 @@ async function markBottleUsedFromSuggestion(id, btnEl){
 
     if (filtered.length === 0){
       list.innerHTML = '';
-      empty.innerHTML = `<p class="text-4xl mb-2">🔍</p><p style="color:var(--muted)">Aucune bouteille ne correspond à votre recherche.</p>`;
+      empty.innerHTML = `<p class="text-4xl mb-2">🔍</p>
+        <p class="mb-3" style="color:var(--muted)">Rien ne correspond à cette recherche.</p>
+        <button onclick="clearFilters()" class="text-[13px] px-4 py-2 rounded-full" style="border:1px solid var(--line);color:var(--gold)">Afficher toute la cave</button>`;
       empty.classList.remove('hidden');
       return;
     }
@@ -1118,6 +1228,12 @@ async function markBottleUsedFromSuggestion(id, btnEl){
   }
 
   function setCategory(cat){ activeCategory = cat; renderApp(); }
+
+  function clearFilters(){
+    document.getElementById('searchInput').value = '';
+    activeCategory = 'Tous';
+    renderApp();
+  }
 
   async function adjustQty(id, delta){
     const b = bottles.find(i => i.id === id);
@@ -1323,7 +1439,7 @@ async function markBottleUsedFromSuggestion(id, btnEl){
   //     s'applique au niveau du PROJET Google Cloud (pas par clé, pas par
   //     modèle isolément dans bien des cas). Une fois ce quota atteint,
   //     changer de modèle Gemini ne suffit plus. On bascule alors sur un
-  //     second fournisseur IA indépendant (Mistral, dont le palier gratuit
+  //     second fournisseur IA indépendant (OpenRouter, dont les modèles
   //     "Experiment" a un débit journalier bien plus généreux) pour que
   //     l'analyse continue de fonctionner même quand Gemini est à sec.
   const GEMINI_FALLBACK_MODELS = ['gemini-3.6-flash', 'gemini-3.5-flash-lite', 'gemini-3.1-flash-lite'];
@@ -1479,28 +1595,97 @@ async function markBottleUsedFromSuggestion(id, btnEl){
   }
 
   // ==========================================================================
-  // Fournisseur IA de secours — Mistral (La Plateforme)
+  // Fournisseur IA de secours — OpenRouter
   // ==========================================================================
-  // Choisi plutôt qu'OpenAI/ChatGPT car l'API OpenAI n'a plus de palier
-  // vraiment gratuit (seulement des crédits d'essai limités dans le temps),
-  // alors que Mistral propose un palier "Experiment" gratuit conçu pour
-  // l'évaluation. Comme il s'agit d'un compte et d'un quota totalement
-  // séparés de Google, ce secours continue de fonctionner un jour où le
-  // quota Gemini est épuisé. L'API est compatible avec le format OpenAI
-  // (/v1/chat/completions), donc la structure des appels est proche de
-  // celle utilisée pour Gemini.
+  // Choisi car c'est aujourd'hui le seul secours réellement gratuit et durable :
+  // compte créé avec un simple email, AUCUNE carte bancaire, et des modèles à
+  // 0 € par token (identifiants suffixés ":free"). Contrairement à Mistral, il
+  // n'y a pas de crédit à consommer : la seule limite est un nombre de requêtes
+  // (de l'ordre de 20/minute et quelques dizaines par jour), ce qui est large
+  // pour lire quelques étiquettes. Et comme c'est un compte totalement séparé
+  // de Google, il fonctionne les jours où le quota Gemini est épuisé.
   //
-  // Contrairement à Gemini, on N'INTERROGE PAS la liste des modèles avant
-  // chaque analyse : ça faisait DEUX appels réseau par tentative (liste +
-  // analyse), ce qui suffisait à lui seul à déclencher la limite de débit
-  // du palier gratuit dès le premier essai. On utilise à la place des alias
-  // "-latest" fixes, que Mistral fait pointer automatiquement vers son
-  // modèle multimodal courant — pas besoin de les redécouvrir à chaque
-  // appel pour rester à jour. "pixtral-large-latest" a été retiré (modèle
-  // abandonné par Mistral) : on démarre directement sur mistral-medium-latest.
-  const MISTRAL_MODELS = ['mistral-medium-latest', 'mistral-small-latest'];
+  // La liste des modèles gratuits change en permanence (des modèles sont
+  // retirés ou repassent en payant sans préavis), donc on NE FIGE PAS de nom :
+  // on interroge le catalogue public d'OpenRouter pour retenir les modèles
+  // réellement gratuits ET capables de lire une image. Ce catalogue est public
+  // (pas d'authentification) et mis en cache 24h, donc il ne consomme pas le
+  // quota de requêtes de l'analyse elle-même.
+  //
+  // Dernier filet : "openrouter/free" est l'auto-routeur d'OpenRouter, qui
+  // choisit lui-même un modèle gratuit adapté à la requête. Un identifiant qui
+  // ne peut pas devenir obsolète, contrairement à un nom de modèle précis.
+  const OPENROUTER_FALLBACK_MODELS = ['openrouter/free'];
+  const OPENROUTER_MODEL_CACHE_KEY = 'openrouter_model_candidates_cache_v2';
+  const OPENROUTER_MODEL_CACHE_TTL = 24 * 60 * 60 * 1000;
 
-  async function callOneMistralModel(model, promptText, imageDataUrl, apiKey, timeoutMs){
+  async function getOpenRouterModelCandidates(needsImage){
+    const cacheKey = OPENROUTER_MODEL_CACHE_KEY + (needsImage ? '_vision' : '_text');
+    try {
+      const cachedRaw = localStorage.getItem(cacheKey);
+      if (cachedRaw){
+        const cached = JSON.parse(cachedRaw);
+        if (Array.isArray(cached.models) && cached.models.length &&
+            (Date.now() - cached.at) < OPENROUTER_MODEL_CACHE_TTL){
+          return cached.models;
+        }
+      }
+    } catch(e){}
+
+    try {
+      const res = await fetch('https://openrouter.ai/api/v1/models');
+      if (!res.ok) throw new Error('catalogue indisponible');
+      const data = await res.json();
+      const all = Array.isArray(data.data) ? data.data : [];
+
+      const candidates = all
+        .filter(m => {
+          const p = m.pricing || {};
+          const isFree = parseFloat(p.prompt || '0') === 0 && parseFloat(p.completion || '0') === 0;
+          if (!isFree) return false;
+          if (!needsImage) return true;
+          const modalities = (m.architecture && m.architecture.input_modalities) || [];
+          return modalities.includes('image');
+        })
+        .map(m => m.id)
+        .filter(id => id && !/embedding|moderation|tts|whisper/i.test(id));
+
+      // Deux tâches très différentes, donc deux classements différents.
+      //
+      //  - Lecture d'étiquette : il faut surtout SAVOIR LIRE une image. Les
+      //    modèles "VL" (vision-language) sont conçus pour ça.
+      //  - Accord mets-vins : aucune image, mais il faut de la CULTURE
+      //    (appellations, cépages, traditions culinaires). Ici un modèle
+      //    vision compact serait un mauvais choix : on privilégie les grands
+      //    modèles généralistes, et on écarte explicitement les modèles
+      //    spécialisés code, nuls en gastronomie malgré de bons scores par
+      //    ailleurs.
+      const visionPriority = /nemotron.*vl|qwen.*vl|vl.*instruct|llama.*vision|pixtral|internvl|gemma/i;
+      const textPriority   = /nemotron|gemma|gpt-oss|llama|qwen(?!.*coder)|mistral|command|hermes|deepseek/i;
+      const textPenalty    = /coder|code|math|embed|guard|vl\b|vision|tiny|mini|small|1b|2b|3b/i;
+
+      if (needsImage){
+        candidates.sort((a, b) => (visionPriority.test(b) ? 1 : 0) - (visionPriority.test(a) ? 1 : 0));
+      } else {
+        const scoreOf = (id) => (textPriority.test(id) ? 2 : 0) - (textPenalty.test(id) ? 3 : 0);
+        candidates.sort((a, b) => scoreOf(b) - scoreOf(a));
+      }
+
+      const top = [...new Set(candidates)].slice(0, 3);
+      // On termine toujours par l'auto-routeur : si les modèles retenus ont été
+      // retirés entre-temps, il reste une chance d'aboutir.
+      const withRouter = [...top, 'openrouter/free'];
+      if (top.length){
+        localStorage.setItem(cacheKey, JSON.stringify({ at: Date.now(), models: withRouter }));
+      }
+      return withRouter;
+    } catch(e){
+      console.error('Catalogue OpenRouter indisponible, utilisation de l\'auto-routeur', e);
+    }
+    return OPENROUTER_FALLBACK_MODELS;
+  }
+
+  async function callOneOpenRouterModel(model, promptText, imageDataUrl, apiKey, timeoutMs){
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
     try {
@@ -1508,11 +1693,14 @@ async function markBottleUsedFromSuggestion(id, btnEl){
         ? [{ type: 'text', text: promptText }, { type: 'image_url', image_url: { url: imageDataUrl } }]
         : promptText;
 
-      const response = await fetch('https://api.mistral.ai/v1/chat/completions', {
+      const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          Authorization: 'Bearer ' + apiKey
+          Authorization: 'Bearer ' + apiKey,
+          // Identifie l'app auprès d'OpenRouter (recommandé, sans effet sur le prix).
+          'HTTP-Referer': location.origin || 'https://ma-cave.local',
+          'X-Title': 'Ma Cave'
         },
         signal: controller.signal,
         body: JSON.stringify({
@@ -1526,23 +1714,22 @@ async function markBottleUsedFromSuggestion(id, btnEl){
       try { data = await response.json(); }
       catch(e){ throw new Error('Réponse invalide du serveur IA (secours)'); }
 
-      if (!response.ok || data.error || data.message){
-        const code = response.status;
-        const message = (data.error && (data.error.message || data.error)) || data.message || `Erreur HTTP ${response.status}`;
+      if (!response.ok || data.error){
+        const code = (data.error && data.error.code) || response.status;
+        const message = (data.error && (data.error.message || data.error)) || `Erreur HTTP ${response.status}`;
         if (code === 404) throw new ModelUnavailableError(message);
         if (code === 401 || code === 403) throw new NonRetryableAIError('Clé IA de secours invalide ou refusée : ' + message);
-        if (code === 400) throw new ModelUnavailableError(message); // souvent : ce modèle ne supporte pas ce type de contenu
+        // 400 sur OpenRouter = souvent un modèle qui n'accepte pas l'image
+        // envoyée : on passe au candidat suivant plutôt que d'abandonner.
+        if (code === 400) throw new ModelUnavailableError(message);
         if (code === 429){
-          // Limite de débit : une info précieuse arrive parfois dans l'en-tête
-          // Retry-After (secondes à attendre). On l'attache à l'erreur pour
-          // que l'appelant attende le bon délai plutôt que de retenter à l'aveugle.
           const retryAfterHeader = response.headers.get('retry-after');
           const retrySec = retryAfterHeader ? parseFloat(retryAfterHeader) : NaN;
-          const err = new Error(message || 'Limite de débit atteinte (palier gratuit)');
-          err.retryAfterMs = !isNaN(retrySec) ? Math.min(Math.max(retrySec, 1), 15) * 1000 : 4000;
+          const err = new Error(message || 'Limite de requêtes atteinte (modèles gratuits)');
+          err.retryAfterMs = !isNaN(retrySec) ? Math.min(Math.max(retrySec, 1), 15) * 1000 : 5000;
           throw err;
         }
-        throw new Error(message); // 503 et autres : potentiellement transitoire
+        throw new Error(message); // 502/503 : capacité gratuite momentanément saturée
       }
 
       const choice = data.choices && data.choices[0];
@@ -1551,7 +1738,7 @@ async function markBottleUsedFromSuggestion(id, btnEl){
       text = String(text).trim().replace(/^```json\s*/i, '').replace(/^```\s*/, '').replace(/```\s*$/, '').trim();
       try { return JSON.parse(text); }
       catch(e){
-        // Sans mode JSON strict, un modèle peut ajouter un peu de texte autour malgré la consigne.
+        // Les modèles gratuits ajoutent parfois du texte autour du JSON.
         const match = text.match(/\{[\s\S]*\}/);
         if (match){ try { return JSON.parse(match[0]); } catch(e2){} }
         throw new Error("Réponse IA de secours mal formée (JSON invalide)");
@@ -1564,28 +1751,32 @@ async function markBottleUsedFromSuggestion(id, btnEl){
     }
   }
 
-  // Une limite de débit (429) s'applique presque toujours à l'ensemble du
-  // compte, pas à un modèle précis : changer de modèle après un 429 ne sert
-  // donc à rien, contrairement à un 404 (ce modèle précis n'existe pas).
-  // La seule chose qui aide vraiment est d'ATTENDRE — d'où cette boucle qui
-  // respecte le délai suggéré par Mistral (ou 4s par défaut) avant de
-  // retenter, au lieu d'enchaîner les appels et d'aggraver la limitation.
-  async function callMistralJSON(promptText, imageDataUrl){
-    const apiKey = localStorage.getItem('mistral_api_key');
+  // Un 404/400 vise un modèle précis → on passe au suivant sans attendre.
+  // Un 429 vise le compte entier → changer de modèle ne sert à rien, il faut
+  // attendre le délai indiqué par OpenRouter avant de retenter.
+  async function callOpenRouterJSON(promptText, imageDataUrl){
+    const apiKey = localStorage.getItem('openrouter_api_key');
     if (!apiKey) throw new Error('Clé IA de secours manquante');
 
+    const models = await getOpenRouterModelCandidates(!!imageDataUrl);
     let lastErr = new Error('IA de secours indisponible');
     let modelIndex = 0;
+    let attempts = 0;
+    const maxAttempts = Math.min(models.length + 2, 5);
 
-    for (let attempt = 0; attempt < 3; attempt++){
-      const model = MISTRAL_MODELS[modelIndex % MISTRAL_MODELS.length];
+    while (attempts < maxAttempts){
+      attempts++;
+      const model = models[Math.min(modelIndex, models.length - 1)];
       try {
-        return await callOneMistralModel(model, promptText, imageDataUrl, apiKey, 15000);
+        return await callOneOpenRouterModel(model, promptText, imageDataUrl, apiKey, 20000);
       } catch(e){
         if (e instanceof NonRetryableAIError) throw e;
         lastErr = e;
-        if (e instanceof ModelUnavailableError){ modelIndex++; continue; } // ce modèle n'existe pas : suivant sans délai
-        if (attempt < 2) await new Promise(r => setTimeout(r, e.retryAfterMs || 4000));
+        if (e instanceof ModelUnavailableError){
+          if (modelIndex < models.length - 1){ modelIndex++; continue; }
+          throw e; // plus aucun candidat à essayer
+        }
+        if (attempts < maxAttempts) await new Promise(r => setTimeout(r, e.retryAfterMs || 5000));
       }
     }
     throw lastErr;
@@ -1593,14 +1784,14 @@ async function markBottleUsedFromSuggestion(id, btnEl){
 
   // Point d'entrée unique utilisé partout dans l'appli : essaie Gemini en
   // premier (si une clé est enregistrée), puis bascule automatiquement sur
-  // Mistral en cas d'échec (quota épuisé, panne, modèle retiré...) si une
+  // OpenRouter en cas d'échec (quota épuisé, panne, modèle retiré...) si une
   // clé de secours est enregistrée. N'échoue que si aucun des deux
   // fournisseurs disponibles n'a réussi.
   async function callAIJSON(promptText, imageDataUrl){
     const geminiKey = localStorage.getItem('gemini_api_key');
-    const mistralKey = localStorage.getItem('mistral_api_key');
+    const backupKey = localStorage.getItem('openrouter_api_key');
 
-    if (!geminiKey && !mistralKey){
+    if (!geminiKey && !backupKey){
       throw new Error('Aucune clé IA enregistrée');
     }
 
@@ -1610,19 +1801,18 @@ async function markBottleUsedFromSuggestion(id, btnEl){
       try {
         return await callGeminiJSON(parts);
       } catch(e){
-        if (!mistralKey) throw new Error(`${e.message || 'Échec Gemini'} (aucune clé de secours Mistral enregistrée dans les réglages)`);
-        console.warn('Gemini indisponible, bascule sur le fournisseur de secours (Mistral)', e);
+        if (!backupKey) throw new Error(`${e.message || 'Échec Gemini'} (aucune clé de secours enregistrée dans les réglages)`);
+        console.warn('Gemini indisponible, bascule sur le fournisseur de secours (OpenRouter)', e);
         try {
-          return await callMistralJSON(promptText, imageDataUrl);
+          return await callOpenRouterJSON(promptText, imageDataUrl);
         } catch(e2){
-          // On remonte une erreur qui reflète l'échec des DEUX fournisseurs, plus utile pour l'utilisateur.
           throw new Error(`Gemini: ${e.message || 'échec'} — Secours: ${e2.message || 'échec'}`);
         }
       }
     }
 
     // Pas de clé Gemini : on va directement au fournisseur de secours.
-    return callMistralJSON(promptText, imageDataUrl);
+    return callOpenRouterJSON(promptText, imageDataUrl);
   }
 
   function withTimeout(promise, ms, message){
@@ -1636,9 +1826,12 @@ async function markBottleUsedFromSuggestion(id, btnEl){
 
 RÈGLES STRICTES :
 1. Réponds UNIQUEMENT avec un objet JSON valide, sans aucun texte avant, après, ni de blocs \`\`\`. Pas de commentaire, pas de clé en dehors de celles listées ci-dessous.
-2. N'INVENTE JAMAIS une information absente de l'étiquette ou que tu ne peux pas déduire avec une réelle confiance de ton expertise (appellation, cépage, style). Dans le doute, laisse le champ texte en chaîne vide "" plutôt que de fabriquer une valeur plausible mais incertaine.
-3. Pour "categorie", en cas d'hésitation entre deux catégories proches (ex. vin muté "cuit" vs "spiritueux", ou spiritueux classique vs "arrange"), choisis celle qui correspond le mieux à l'usage principal du produit tel qu'il apparaît sur l'étiquette. "sans_alcool" uniquement si l'étiquette indique explicitement 0% ou "sans alcool".
-4. Pour "degre" : utilise en priorité la valeur lisible sur l'étiquette. Si elle est illisible, tu peux estimer à partir de repères connus (vin non muté : 8-16% ; vin cuit/muté : 15-22% ; spiritueux : 35-50%), mais laisse "" si même une estimation par style serait trop incertaine (ex. spiritueux artisanal atypique).
+2. PRINCIPE LE PLUS IMPORTANT — dans le doute, on omet. Une information manquante ne gêne pas l'utilisateur ; une information fausse le trompe et pollue durablement sa cave. N'écris donc JAMAIS une valeur "plausible" : si tu ne la lis pas clairement sur l'étiquette ou ne la déduis pas avec une vraie certitude d'un élément identifié (domaine, appellation, marque, mention explicite), laisse "" pour un champ texte et omets la clé pour un critère.
+3. Ne devine RIEN à partir de la seule forme, couleur ou allure de la bouteille : une bouteille sombre n'est pas forcément un rouge, un flacon trapu pas forcément un rhum. Si l'étiquette est floue, partiellement masquée ou illisible, remplis uniquement le peu dont tu es certain et laisse tout le reste vide.
+4. Ne recopie jamais un texte marketing de l'étiquette ("grande cuvée d'exception") comme s'il s'agissait d'une information factuelle.
+5. Pour "categorie", en cas d'hésitation entre deux catégories proches (ex. vin muté "cuit" vs "spiritueux", ou spiritueux classique vs "arrange"), choisis celle qui correspond le mieux à l'usage principal du produit tel qu'il apparaît sur l'étiquette. "sans_alcool" uniquement si l'étiquette indique explicitement 0% ou "sans alcool".
+6. Pour "degre" : utilise en priorité la valeur lisible sur l'étiquette. Si elle est illisible, tu peux estimer à partir de repères connus (vin non muté : 8-16% ; vin cuit/muté : 15-22% ; spiritueux : 35-50%), mais laisse "" si même une estimation par style serait trop incertaine (ex. spiritueux artisanal atypique).
+7. Pour "prix" : ne propose une fourchette que si tu reconnais réellement la bouteille ou son appellation. Sinon "". Un prix inventé est pire que pas de prix.
 
 Structure de réponse :
 {
@@ -1655,8 +1848,9 @@ Structure de réponse :
 Consigne pour "criteres" (la seule partie de la structure au nombre de clés VARIABLE) :
 Liste complète des clés possibles, chacune notée en entier de 1 (très faible) à 5 (très élevé) : fruit, acidite, tanin, puissance, mineralite, fraicheur, effervescence, finesse, douceur, longueur, complexite, boise, originalite, tourbe.
 - N'inclus QUE les clés réellement pertinentes pour la catégorie et le type précis identifiés (typiquement 3 à 5 clés) : par exemple pas de "tanin" ni "mineralite" pour un rhum, pas d'"effervescence" pour un vin tranquille.
-- "tourbe" est un cas particulier : ne l'inclus QUE si le type précis est "Whisky" ET que l'étiquette indique ou suggère un style tourbé (ex. Islay, Laphroaig, Ardbeg, Talisker, mention "peated"/"tourbé"). Pour un whisky non tourbé, omets complètement cette clé plutôt que de mettre 1.
-- N'invente pas une note si tu ne peux vraiment pas te faire d'opinion sur ce critère précis pour cette bouteille : dans ce cas, omets la clé plutôt que de mettre une valeur par défaut arbitraire.
+- Chaque note doit s'appuyer sur un élément IDENTIFIÉ (appellation, cépage, style de production, marque reconnue). Si tu n'as pas identifié le style avec assez de certitude pour te prononcer sur un critère, omets cette clé. Mieux vaut renvoyer 2 critères sûrs que 5 approximatifs : l'utilisateur comparera ses bouteilles sur ces notes, une note inventée fausse toutes ses comparaisons.
+- Si l'étiquette est trop peu lisible pour identifier le style, renvoie "criteres": {} (objet vide). C'est une réponse parfaitement acceptable.
+- "tourbe" est un cas particulier : ne l'inclus QUE si le type précis est "Whisky" ET que l'étiquette indique ou suggère un style tourbé (ex. Islay, Laphroaig, Ardbeg, Talisker, mention "peated"/"tourbé"). Pour un whisky non tourbé, ou un whisky dont tu ignores s'il est tourbé, omets complètement cette clé plutôt que de mettre 1.
 
 Utilise "arrange" pour tout spiritueux infusé, aromatisé ou fruit macéré dans l'alcool : rhum ou whisky arrangé, limoncello, cognac au citron, cerises à l'eau de vie, liqueur artisanale, etc. — jamais pour un spiritueux classique.
 
@@ -1668,15 +1862,30 @@ Rappel final : ta réponse doit être EXCLUSIVEMENT l'objet JSON ci-dessus rempl
   async function runAiAnalysis(analysisDataUrl, storeDataUrl){
     const feedback = document.getElementById('aiFeedback');
     const submitBtn = document.getElementById('submitFormBtn');
-    feedback.innerHTML = `<span class="loader" style="width:11px;height:11px;display:inline-block;vertical-align:-1px;margin-right:6px"></span> Analyse de la bouteille par l'IA en cours…`;
+    const spin = `<span class="loader" style="width:11px;height:11px;display:inline-block;vertical-align:-1px;margin-right:6px"></span>`;
+    // L'analyse peut prendre plusieurs dizaines de secondes (surtout si le
+    // secours OpenRouter entre en jeu avec ses temps d'attente). Un message figé
+    // donne l'impression que l'appli a planté : on fait vivre l'attente.
+    const stages = [
+      `${spin} Lecture de l'étiquette…`,
+      `${spin} Identification de la bouteille…`,
+      `${spin} Estimation du profil de dégustation…`,
+      `${spin} Le sommelier prend son temps, c'est bon signe…`,
+    ];
+    let stage = 0;
+    feedback.innerHTML = stages[0];
+    const ticker = setInterval(() => {
+      stage = Math.min(stage + 1, stages.length - 1);
+      feedback.innerHTML = stages[stage];
+    }, 6000);
     submitBtn.disabled = true;
     submitBtn.style.opacity = '0.5';
 
     try {
       const geminiKey = localStorage.getItem('gemini_api_key');
-      const mistralKey = localStorage.getItem('mistral_api_key');
-      if (!geminiKey && !mistralKey) {
-        feedback.innerHTML = `<span style="color:#e08a97">⚠️ Aucune clé IA enregistrée. Ajoutez-en une dans les paramètres (icône 📄).</span>`;
+      const backupKey = localStorage.getItem('openrouter_api_key');
+      if (!geminiKey && !backupKey) {
+        feedback.innerHTML = `<span style="color:#e08a97">⚠️ Pas encore de clé IA.</span> <span style="color:var(--muted)">Ouvrez les réglages (icône en haut à droite) pour en ajouter une, ou remplissez la fiche à la main — ça marche très bien aussi.</span>`;
         return;
       }
       if (storeDataUrl) document.getElementById('imageUrlInput').value = storeDataUrl;
@@ -1693,13 +1902,16 @@ Rappel final : ta réponse doit être EXCLUSIVEMENT l'objet JSON ci-dessus rempl
       document.getElementById('notesInput').value = parsed.notes || '';
       renderScoreInputs(parsed.criteres || {});
 
-      feedback.innerHTML = `<span style="color:#7fbf9c">✅ Bouteille identifiée avec succès par l'IA ! Vérifiez les informations.</span>`;
+      const filledCount = Object.keys(parsed.criteres || {}).length;
+      const degreeNote = parsed.degre ? ` et le degré (${esc(parsed.degre)}%)` : '';
+      feedback.innerHTML = `<span style="color:#7fbf9c">✅ Bouteille identifiée !</span> <span style="color:var(--muted)">${filledCount ? `${filledCount} critère(s) de dégustation` : 'Aucun critère'} proposé(s)${degreeNote}. Relisez et corrigez avant d'enregistrer — c'est votre palais qui a le dernier mot.</span>`;
 
     } catch(err) {
       console.error(err);
       const detail = err && err.message ? esc(err.message) : '';
-      feedback.innerHTML = `<span style="color:#e08a97">⚠️ Échec de l'analyse IA${detail ? ' : ' + detail : ''}. Vous pouvez réessayer (bouton ci-dessus) ou remplir la fiche manuellement.</span>`;
+      feedback.innerHTML = `<span style="color:#e08a97">⚠️ L'IA n'a pas pu lire cette étiquette${detail ? ' : ' + detail : ''}.</span> <span style="color:var(--muted)">Réessayez avec le bouton ci-dessus (une photo bien éclairée, sans reflet, aide beaucoup), ou remplissez la fiche à la main.</span>`;
     } finally {
+      clearInterval(ticker);
       submitBtn.disabled = false;
       submitBtn.style.opacity = '1';
     }
@@ -1796,17 +2008,17 @@ Rappel final : ta réponse doit être EXCLUSIVEMENT l'objet JSON ci-dessus rempl
     showToast('Clé IA enregistrée sur cet appareil');
   }
 
-  function saveMistralKey() {
-    const key = document.getElementById('mistralKeyInput').value.trim();
-    localStorage.setItem('mistral_api_key', key);
+  function saveOpenRouterKey() {
+    const key = document.getElementById('openrouterKeyInput').value.trim();
+    localStorage.setItem('openrouter_api_key', key);
     showToast('Clé IA de secours enregistrée sur cet appareil');
   }
 
   window.addEventListener('DOMContentLoaded', () => {
     const savedKey = localStorage.getItem('gemini_api_key');
     if (savedKey) document.getElementById('geminiKeyInput').value = savedKey;
-    const savedMistralKey = localStorage.getItem('mistral_api_key');
-    if (savedMistralKey) document.getElementById('mistralKeyInput').value = savedMistralKey;
+    const savedBackupKey = localStorage.getItem('openrouter_api_key');
+    if (savedBackupKey) document.getElementById('openrouterKeyInput').value = savedBackupKey;
   });
 </script>
 </body>
