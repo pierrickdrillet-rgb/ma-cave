@@ -1547,6 +1547,7 @@ async function markBottleUsedFromSuggestion(id, btnEl){
         if (blockReason) throw new NonRetryableAIError('Contenu refusé par le filtre de sécurité (' + blockReason + ')');
         if (candidate && candidate.finishReason === 'SAFETY') throw new NonRetryableAIError('Contenu refusé par le filtre de sécurité');
         throw new Error("Réponse vide de l'IA");
+        console.log('Réponse brute du modèle ' + model + ' :', JSON.stringify(data, null, 2));
       }
       if (candidate.finishReason === 'MAX_TOKENS'){
         throw new Error('Réponse tronquée (limite de tokens atteinte)');
