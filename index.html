@@ -109,7 +109,7 @@
 
         <div>
           <label class="block text-[13px] font-medium mb-1" style="color:var(--muted)">Type précis <span class="font-normal">(facultatif)</span></label>
-          <input type="text" id="subtypeInput" list="subtypeOptions" placeholder="Ex. Gin, Whisky, Cognac, Bordeaux…" class="w-full rounded-xl px-3 py-2.5 text-[14px]" style="background:var(--bg-950);border:1px solid var(--line);color:var(--cream)">
+          <input type="text" id="subtypeInput" list="subtypeOptions" oninput="renderScoreInputs(collectScoreInputs())" placeholder="Ex. Gin, Whisky, Cognac, Bordeaux…" class="w-full rounded-xl px-3 py-2.5 text-[14px]" style="background:var(--bg-950);border:1px solid var(--line);color:var(--cream)">
           <datalist id="subtypeOptions">
             <option value="Gin"><option value="Rhum"><option value="Rhum arrangé"><option value="Whisky">
             <option value="Vodka"><option value="Cognac"><option value="Armagnac"><option value="Tequila">
@@ -122,7 +122,7 @@
 
         <div>
           <label class="block text-[13px] font-medium mb-1" style="color:var(--muted)">Catégorie</label>
-          <select id="catInput" required onchange="renderScoreInputs()" class="w-full rounded-xl px-3 py-2.5 text-[14px]" style="background:var(--bg-950);border:1px solid var(--line);color:var(--cream)"></select>
+          <select id="catInput" required onchange="renderScoreInputs(collectScoreInputs())" class="w-full rounded-xl px-3 py-2.5 text-[14px]" style="background:var(--bg-950);border:1px solid var(--line);color:var(--cream)"></select>
           <p class="text-[11.5px] mt-1" style="color:var(--muted)">Sert à filtrer votre cave et à proposer des accords fiables.</p>
         </div>
 
@@ -261,11 +261,28 @@
     sans_alcool: [ { key:'fruit', label:'Fruité' }, { key:'acidite', label:'Acidité' }, { key:'douceur', label:'Douceur' }, { key:'fraicheur', label:'Fraîcheur' } ],
   };
 
+  // Critères supplémentaires propres à un type précis (badge "Type précis"),
+  // qui s'ajoutent aux critères de la catégorie plutôt que de les remplacer —
+  // ex. "Tourbé" n'a de sens que pour un whisky, pas pour un spiritueux en général.
+  const EXTRA_CRITERIA_BY_SUBTYPE = [
+    { match: /whisky|whiskey/, criteria: [ { key:'tourbe', label:'Tourbé' } ] },
+  ];
+
+  function getCriteriaFor(category, subtype){
+    const base = CRITERIA_BY_CATEGORY[category] || [];
+    const normSub = normalize(subtype || '');
+    const extras = EXTRA_CRITERIA_BY_SUBTYPE
+      .filter(entry => entry.match.test(normSub))
+      .flatMap(entry => entry.criteria);
+    return [...base, ...extras];
+  }
+
   function renderScoreInputs(existingScores){
     const wrap = document.getElementById('scoreInputs');
     if (!wrap) return;
     const cat = document.getElementById('catInput').value;
-    const criteria = CRITERIA_BY_CATEGORY[cat] || [];
+    const subtype = document.getElementById('subtypeInput').value;
+    const criteria = getCriteriaFor(cat, subtype);
     const scores = existingScores || {};
 
     if (!criteria.length){
@@ -297,7 +314,7 @@
   }
 
   function scoreBarsHtml(b){
-    const criteria = CRITERIA_BY_CATEGORY[b.category] || [];
+    const criteria = getCriteriaFor(b.category, b.subtype);
     if (!criteria.length || !b.scores) return '';
     const cat = CAT_BY_KEY[b.category];
     const color = cat ? cat.color : '#c9a15a';
@@ -1615,24 +1632,38 @@ async function markBottleUsedFromSuggestion(id, btnEl){
     ]);
   }
 
-  const AI_LABEL_PROMPT = `Tu es un sommelier expert. Analyse cette étiquette de bouteille.
-Renvoie UNIQUEMENT un objet JSON valide avec cette structure exacte, sans aucun texte autour :
+  const AI_LABEL_PROMPT = `Tu es un sommelier expert. Analyse cette étiquette de bouteille et réponds avec un luxe de précision.
+
+RÈGLES STRICTES :
+1. Réponds UNIQUEMENT avec un objet JSON valide, sans aucun texte avant, après, ni de blocs \`\`\`. Pas de commentaire, pas de clé en dehors de celles listées ci-dessous.
+2. N'INVENTE JAMAIS une information absente de l'étiquette ou que tu ne peux pas déduire avec une réelle confiance de ton expertise (appellation, cépage, style). Dans le doute, laisse le champ texte en chaîne vide "" plutôt que de fabriquer une valeur plausible mais incertaine.
+3. Pour "categorie", en cas d'hésitation entre deux catégories proches (ex. vin muté "cuit" vs "spiritueux", ou spiritueux classique vs "arrange"), choisis celle qui correspond le mieux à l'usage principal du produit tel qu'il apparaît sur l'étiquette. "sans_alcool" uniquement si l'étiquette indique explicitement 0% ou "sans alcool".
+4. Pour "degre" : utilise en priorité la valeur lisible sur l'étiquette. Si elle est illisible, tu peux estimer à partir de repères connus (vin non muté : 8-16% ; vin cuit/muté : 15-22% ; spiritueux : 35-50%), mais laisse "" si même une estimation par style serait trop incertaine (ex. spiritueux artisanal atypique).
+
+Structure de réponse :
 {
   "nom": "Nom du domaine et de la cuvée",
   "categorie": "L'une de ces valeurs exactes : rouge, blanc, rose, bulles, cuit, spiritueux, arrange, sans_alcool",
   "type": "Type précis et court, affiché en badge (ex: Gin, Rhum, Whisky, Vodka, Cognac, Limoncello, Bordeaux, Champagne...)",
   "detail": "Appellation, cépage, millésime",
-  "prix": "Estimation du prix moyen en euros (ex: 15€ - 20€)",
-  "degre": "Degré d'alcool en pourcentage, nombre seul sans le symbole % (ex: 13.5). Laisse vide si vraiment illisible ou inconnu.",
-  "criteres": {
-    "fruit": "1 à 5", "acidite": "1 à 5", "tanin": "1 à 5", "puissance": "1 à 5",
-    "mineralite": "1 à 5", "fraicheur": "1 à 5", "effervescence": "1 à 5", "finesse": "1 à 5",
-    "douceur": "1 à 5", "longueur": "1 à 5", "complexite": "1 à 5", "boise": "1 à 5", "originalite": "1 à 5"
-  },
+  "prix": "Estimation du prix moyen en euros (ex: 15€ - 20€), ou \"\" si aucune estimation fiable n'est possible",
+  "degre": "Degré d'alcool en pourcentage, nombre seul sans le symbole % (ex: 13.5), ou \"\" (voir règle 4)",
+  "criteres": { /* voir consigne ci-dessous — ce champ seul varie en nombre de clés selon la boisson */ },
   "notes": "Courte note de dégustation. Propose un accord avec une cuisine semi-gastronomique simple. Si c'est un vin rouge, oriente vers des plats épicés. Si c'est un rhum/vin cuit, oriente vers un dessert fort en chocolat. Adapte tes suggestions pour qu'elles puissent se décliner facilement pour un enfant. IMPORTANT : Ne propose JAMAIS d'accords contenant des champignons."
 }
+
+Consigne pour "criteres" (la seule partie de la structure au nombre de clés VARIABLE) :
+Liste complète des clés possibles, chacune notée en entier de 1 (très faible) à 5 (très élevé) : fruit, acidite, tanin, puissance, mineralite, fraicheur, effervescence, finesse, douceur, longueur, complexite, boise, originalite, tourbe.
+- N'inclus QUE les clés réellement pertinentes pour la catégorie et le type précis identifiés (typiquement 3 à 5 clés) : par exemple pas de "tanin" ni "mineralite" pour un rhum, pas d'"effervescence" pour un vin tranquille.
+- "tourbe" est un cas particulier : ne l'inclus QUE si le type précis est "Whisky" ET que l'étiquette indique ou suggère un style tourbé (ex. Islay, Laphroaig, Ardbeg, Talisker, mention "peated"/"tourbé"). Pour un whisky non tourbé, omets complètement cette clé plutôt que de mettre 1.
+- N'invente pas une note si tu ne peux vraiment pas te faire d'opinion sur ce critère précis pour cette bouteille : dans ce cas, omets la clé plutôt que de mettre une valeur par défaut arbitraire.
+
 Utilise "arrange" pour tout spiritueux infusé, aromatisé ou fruit macéré dans l'alcool : rhum ou whisky arrangé, limoncello, cognac au citron, cerises à l'eau de vie, liqueur artisanale, etc. — jamais pour un spiritueux classique.
-Pour "criteres" : base-toi sur ton expertise du style/appellation/cépage identifié pour estimer chaque note, MAIS n'inclus dans l'objet que les critères réellement pertinents pour cette catégorie précise de boisson (par exemple : pas de "tanin" ni "mineralite" pour un rhum, pas d'"effervescence" pour un vin tranquille). Omets entièrement les critères non pertinents plutôt que de mettre une valeur par défaut.`;
+
+Exemple complet pour un whisky tourbé d'Islay à 46% (à titre d'illustration du format attendu, n'utilise ces valeurs que si elles correspondent réellement à la bouteille photographiée) :
+{"nom":"Ardbeg Ten","categorie":"spiritueux","type":"Whisky","detail":"Single Malt Scotch Whisky, Islay, 10 ans d'âge","prix":"45€ - 55€","degre":"46","criteres":{"puissance":4,"douceur":2,"boise":3,"longueur":5,"tourbe":5},"notes":"Fumé et iodé, à servir avec un dessert au chocolat noir intense — parfait aussi pour un enfant en version chocolat chaud très corsé (sans alcool bien sûr)."}
+
+Rappel final : ta réponse doit être EXCLUSIVEMENT l'objet JSON ci-dessus rempli pour la bouteille photographiée, rien d'autre.`;
 
   async function runAiAnalysis(analysisDataUrl, storeDataUrl){
     const feedback = document.getElementById('aiFeedback');
