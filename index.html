@@ -597,6 +597,124 @@
     return String(str).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   }
 
+  // ==========================================================================
+  // Extraction/réparation JSON "best effort" — utilisée par les DEUX
+  // fournisseurs (Gemini et OpenRouter) : plutôt que d'abandonner dès que la
+  // réponse n'est pas un JSON strictement valide, on tente de récupérer un
+  // maximum d'informations réellement générées avant de renoncer.
+  // ==========================================================================
+
+  // Repère la première accolade puis compte la profondeur (en ignorant les
+  // accolades à l'intérieur des chaînes) pour isoler exactement l'objet JSON,
+  // même s'il y a du texte avant ou après (contrairement à une regex gloutonne
+  // {[\s\S]*}, qui échoue dès qu'il y a du texte après l'objet).
+  function extractBalancedJson(text){
+    const start = text.indexOf('{');
+    if (start === -1) return null;
+    let depth = 0, inString = false, escape = false;
+    for (let i = start; i < text.length; i++){
+      const ch = text[i];
+      if (inString){
+        if (escape) escape = false;
+        else if (ch === '\\') escape = true;
+        else if (ch === '"') inString = false;
+        continue;
+      }
+      if (ch === '"'){ inString = true; continue; }
+      if (ch === '{') depth++;
+      else if (ch === '}'){
+        depth--;
+        if (depth === 0) return text.slice(start, i + 1);
+      }
+    }
+    return null; // aucune accolade fermante correspondante : réponse tronquée
+  }
+
+  // Repère, à la profondeur 1 (juste à l'intérieur de l'accolade racine), la
+  // dernière virgule séparant deux champs complets. Utile pour retirer le
+  // tout dernier champ resté incomplet après une coupure, en ne gardant que
+  // les champs déjà entièrement générés avant lui.
+  function findLastTopLevelComma(text){
+    let depth = 0, inString = false, escape = false, lastComma = -1;
+    for (let i = 0; i < text.length; i++){
+      const ch = text[i];
+      if (inString){
+        if (escape) escape = false;
+        else if (ch === '\\') escape = true;
+        else if (ch === '"') inString = false;
+        continue;
+      }
+      if (ch === '"'){ inString = true; continue; }
+      if (ch === '{' || ch === '[') depth++;
+      else if (ch === '}' || ch === ']') depth--;
+      else if (ch === ',' && depth === 1) lastComma = i;
+    }
+    return lastComma;
+  }
+
+  // Referme proprement un JSON coupé net en fin de flux (le cas le plus
+  // fréquent : un modèle gratuit qui atteint sa limite de tokens en plein
+  // milieu d'une valeur) : referme la chaîne restée ouverte, retire une
+  // virgule/deux-points traînant en toute fin, puis referme les
+  // accolades/crochets encore ouverts dans l'ordre inverse d'ouverture. Ne
+  // corrige pas un JSON mal formé ailleurs qu'à la toute fin (guillemet ou
+  // virgule manquant au milieu) — seulement une coupure nette.
+  function repairTruncatedJson(text){
+    let out = text;
+    const stack = [];
+    let inString = false, escape = false;
+    for (let i = 0; i < out.length; i++){
+      const ch = out[i];
+      if (inString){
+        if (escape) escape = false;
+        else if (ch === '\\') escape = true;
+        else if (ch === '"') inString = false;
+        continue;
+      }
+      if (ch === '"'){ inString = true; continue; }
+      if (ch === '{' || ch === '[') stack.push(ch);
+      else if (ch === '}' || ch === ']') stack.pop();
+    }
+    if (!stack.length && !inString) return null; // déjà complet (ou coupure non reconnaissable)
+    if (inString) out += '"';
+    out = out.replace(/,\s*$/, '').replace(/:\s*$/, ':null');
+    for (let i = stack.length - 1; i >= 0; i--) out += stack[i] === '{' ? '}' : ']';
+    return out;
+  }
+
+  // Point d'entrée unique : essaie un parse direct, puis une extraction de
+  // l'objet complet s'il est noyé dans du texte, puis une réparation de
+  // coupure, puis (en dernier recours) retire le tout dernier champ resté
+  // incomplet et referme à partir de là. Retourne l'objet obtenu ou null.
+  function parseAIJsonResponse(rawText){
+    const cleaned = (rawText || '').trim().replace(/```json/gi, '').replace(/```/g, '').trim();
+    try { return JSON.parse(cleaned); } catch(e){}
+
+    const balanced = extractBalancedJson(cleaned) || extractBalancedJson(rawText || '');
+    if (balanced){
+      try { return JSON.parse(balanced); } catch(e){}
+    }
+
+    const startIdx = cleaned.indexOf('{');
+    if (startIdx === -1) return null;
+    const source = cleaned.slice(startIdx);
+
+    const repaired = repairTruncatedJson(source);
+    if (repaired){
+      try { return JSON.parse(repaired); } catch(e){}
+    }
+
+    const lastSafeComma = findLastTopLevelComma(source);
+    if (lastSafeComma > 0){
+      const trimmedRepaired = repairTruncatedJson(source.slice(0, lastSafeComma));
+      if (trimmedRepaired){
+        try { return JSON.parse(trimmedRepaired); } catch(e){}
+      }
+    }
+
+    return null;
+  }
+
   function showToast(msg, type){
     let t = document.getElementById('toast');
     if (!t){ t = document.createElement('div'); t.id = 'toast'; document.body.appendChild(t); }
@@ -1551,16 +1669,18 @@ async function markBottleUsedFromSuggestion(id, btnEl){
         console.error('Réponse brute du modèle ' + model + ' :', data);
         throw new Error("Réponse vide de l'IA");
       }
-      if (candidate.finishReason === 'MAX_TOKENS'){
-        throw new Error('Réponse tronquée (limite de tokens atteinte)');
-      }
-
       // response_mime_type:'application/json' évite en principe les
-      // blocs ```json, mais on les retire quand même par sécurité.
-      let text = candidate.content.parts.map(p => p.text || '').join('').trim();
-      text = text.replace(/^```json\s*/i, '').replace(/^```\s*/, '').replace(/```\s*$/, '').trim();
-      try { return JSON.parse(text); }
-      catch(e){ throw new Error("Réponse IA mal formée (JSON invalide)"); }
+      // blocs ```json, mais on les retire quand même par sécurité. On tente
+      // le parsing/la réparation AVANT de traiter une coupure par limite de
+      // tokens comme un échec définitif : souvent, une bonne partie des
+      // champs a déjà été générée et reste exploitable.
+      const text = candidate.content.parts.map(p => p.text || '').join('').trim();
+      const parsed = parseAIJsonResponse(text);
+      if (parsed) return parsed;
+      if (candidate.finishReason === 'MAX_TOKENS'){
+        throw new Error('Réponse tronquée (limite de tokens atteinte) et irrécupérable');
+      }
+      throw new Error("Réponse IA mal formée (JSON invalide, même après tentative de réparation)");
     } catch(e){
       if (e.name === 'AbortError') throw new Error('Délai dépassé pour ce modèle');
       throw e;
@@ -1709,34 +1829,6 @@ async function markBottleUsedFromSuggestion(id, btnEl){
     return '';
   }
 
-  // Certains modèles gratuits ne terminent pas proprement leur JSON (texte
-  // parasite avant/après, réponse coupée). Plutôt qu'une regex gloutonne
-  // {[\s\S]*} — qui échoue dès qu'il y a du texte APRÈS l'objet JSON — on
-  // repère la première accolade puis on compte la profondeur (en ignorant les
-  // accolades à l'intérieur des chaînes) pour isoler exactement l'objet,
-  // quel que soit ce qui l'entoure.
-  function extractBalancedJson(text){
-    const start = text.indexOf('{');
-    if (start === -1) return null;
-    let depth = 0, inString = false, escape = false;
-    for (let i = start; i < text.length; i++){
-      const ch = text[i];
-      if (inString){
-        if (escape) escape = false;
-        else if (ch === '\\') escape = true;
-        else if (ch === '"') inString = false;
-        continue;
-      }
-      if (ch === '"'){ inString = true; continue; }
-      if (ch === '{') depth++;
-      else if (ch === '}'){
-        depth--;
-        if (depth === 0) return text.slice(start, i + 1);
-      }
-    }
-    return null; // aucune accolade fermante correspondante : réponse tronquée
-  }
-
 async function callOneOpenRouterModel(model, promptText, imageDataUrl, apiKey, timeoutMs){
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
@@ -1859,15 +1951,9 @@ async function callOneOpenRouterModel(model, promptText, imageDataUrl, apiKey, t
         (data && JSON.stringify(data).slice(0, 150)) || 'raison inconnue';
       throw new ModelUnavailableError(`${model} : réponse vide (${reason})`, 'emptyContent');
     }
-    const cleaned = text.trim().replace(/```json/gi, '').replace(/```/g, '').trim();
-    try { return JSON.parse(cleaned); }
-    catch(e){
-      const extracted = extractBalancedJson(cleaned) || extractBalancedJson(text);
-      if (extracted){
-        try { return JSON.parse(extracted); } catch(e2){}
-      }
-      throw new ModelUnavailableError(`${model} : réponse mal formée (JSON invalide)`, 'malformedJson');
-    }
+    const parsed = parseAIJsonResponse(text);
+    if (parsed) return parsed;
+    throw new ModelUnavailableError(`${model} : réponse mal formée (JSON invalide, même après tentative de réparation)`, 'malformedJson');
   } catch(e){
     if (e.name === 'AbortError') throw new Error(`Délai dépassé pour ${model}`);
     throw e;
