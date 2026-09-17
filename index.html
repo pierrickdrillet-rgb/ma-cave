@@ -1447,7 +1447,9 @@ async function markBottleUsedFromSuggestion(id, btnEl){
   const GEMINI_MODEL_CACHE_TTL = 24 * 60 * 60 * 1000; // 24h : la gamme de modèles ne change pas d'une minute à l'autre
 
   class NonRetryableAIError extends Error {}   // clé invalide, requête refusée, contenu bloqué… retenter ne changera rien
-  class ModelUnavailableError extends Error {} // 404 : ce modèle précis n'existe plus, on passe au suivant sans délai
+  class ModelUnavailableError extends Error {  // ce modèle précis est inutilisable (retiré, payant, réponse vide/invalide) : on passe au suivant sans délai
+    constructor(message, code){ super(message); this.code = code; }
+  }
 
   // Interroge la liste réelle des modèles disponibles pour cette clé et
   // sélectionne les meilleurs candidats "flash" (rapides et multimodaux),
@@ -1535,7 +1537,7 @@ async function markBottleUsedFromSuggestion(id, btnEl){
       if (!response.ok || data.error){
         const code = (data.error && data.error.code) || response.status;
         const message = (data.error && data.error.message) || `Erreur HTTP ${response.status}`;
-        if (code === 404) throw new ModelUnavailableError(message);
+        if (code === 404) throw new ModelUnavailableError(message, 'http404');
         if (code === 401 || code === 403) throw new NonRetryableAIError('Clé IA invalide ou refusée : ' + message);
         if (code === 400) throw new NonRetryableAIError(message);
         throw new Error(message); // 429 / 503 / autres : potentiellement transitoire, on retentera
@@ -1546,8 +1548,8 @@ async function markBottleUsedFromSuggestion(id, btnEl){
         const blockReason = data.promptFeedback && data.promptFeedback.blockReason;
         if (blockReason) throw new NonRetryableAIError('Contenu refusé par le filtre de sécurité (' + blockReason + ')');
         if (candidate && candidate.finishReason === 'SAFETY') throw new NonRetryableAIError('Contenu refusé par le filtre de sécurité');
+        console.error('Réponse brute du modèle ' + model + ' :', data);
         throw new Error("Réponse vide de l'IA");
-        console.log('Réponse brute du modèle ' + model + ' :', JSON.stringify(data, null, 2));
       }
       if (candidate.finishReason === 'MAX_TOKENS'){
         throw new Error('Réponse tronquée (limite de tokens atteinte)');
@@ -1565,6 +1567,10 @@ async function markBottleUsedFromSuggestion(id, btnEl){
     } finally {
       clearTimeout(timeoutId);
     }
+  }
+
+  function invalidateGeminiModelCache(){
+    try { localStorage.removeItem(GEMINI_MODEL_CACHE_KEY); } catch(e){}
   }
 
   // Essaie chaque modèle candidat l'un après l'autre (rapide, sans délai
@@ -1587,7 +1593,13 @@ async function markBottleUsedFromSuggestion(id, btnEl){
         } catch(e){
           if (e instanceof NonRetryableAIError) throw e;
           lastErr = e;
-          if (e instanceof ModelUnavailableError) continue; // ce modèle n'existe pas/plus : suivant sans délai
+          if (e instanceof ModelUnavailableError){
+            // Ce modèle précis a été retiré : on invalide le cache pour que le
+            // prochain essai reparte d'une liste fraîche plutôt que de retomber
+            // sur ce même modèle mort pendant 24h.
+            if (e.code === 'http404') invalidateGeminiModelCache();
+            continue;
+          }
           if (pass > 0) await new Promise(r => setTimeout(r, 600));
         }
       }
@@ -1686,6 +1698,17 @@ async function markBottleUsedFromSuggestion(id, btnEl){
     return OPENROUTER_FALLBACK_MODELS;
   }
 
+  // Le contenu peut être une simple chaîne, ou (pour certains modèles/proxys)
+  // un tableau de blocs {type:'text', text:'...'}. On gère les deux formats
+  // plutôt que de traiter silencieusement un tableau comme "vide".
+  function extractOpenRouterText(message){
+    if (!message) return '';
+    const c = message.content;
+    if (typeof c === 'string') return c;
+    if (Array.isArray(c)) return c.map(part => (typeof part === 'string' ? part : (part && part.text) || '')).join('');
+    return '';
+  }
+
 async function callOneOpenRouterModel(model, promptText, imageDataUrl, apiKey, timeoutMs){
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
@@ -1719,10 +1742,10 @@ async function callOneOpenRouterModel(model, promptText, imageDataUrl, apiKey, t
       const message = (data.error && (data.error.message || data.error)) || `Erreur HTTP ${response.status}`;
       // 402 = crédit insuffisant / modèle payant sélectionné par erreur : inutile de
       // retenter le même modèle, mais on peut essayer un AUTRE modèle gratuit.
-      if (code === 402) throw new ModelUnavailableError(`Modèle payant ou crédit épuisé (${model}) : ${message}`);
-      if (code === 404) throw new ModelUnavailableError(`${model} : ${message}`);
+      if (code === 402) throw new ModelUnavailableError(`Modèle payant ou crédit épuisé (${model}) : ${message}`, 'http402');
+      if (code === 404) throw new ModelUnavailableError(`${model} : ${message}`, 'http404');
       if (code === 401 || code === 403) throw new NonRetryableAIError('Clé IA de secours invalide ou refusée : ' + message);
-      if (code === 400) throw new ModelUnavailableError(`${model} : ${message}`);
+      if (code === 400) throw new ModelUnavailableError(`${model} : ${message}`, 'http400');
       if (code === 429){
         const retryAfterHeader = response.headers.get('retry-after');
         const retrySec = retryAfterHeader ? parseFloat(retryAfterHeader) : NaN;
@@ -1734,14 +1757,24 @@ async function callOneOpenRouterModel(model, promptText, imageDataUrl, apiKey, t
     }
 
     const choice = data.choices && data.choices[0];
-    let text = choice && choice.message && choice.message.content;
-    if (!text) throw new Error(`Réponse vide de l'IA de secours (${model})`);
-    text = String(text).trim().replace(/^```json\s*/i, '').replace(/^```\s*/, '').replace(/```\s*$/, '').trim();
-    try { return JSON.parse(text); }
+    const text = extractOpenRouterText(choice && choice.message);
+    if (!text){
+      // Un contenu vide vient presque toujours d'un modèle incapable de traiter
+      // CETTE requête précise (image non supportée malgré l'étiquette du
+      // catalogue, refus de modération sur l'offre gratuite…) plutôt que d'une
+      // panne réseau : on considère ce modèle comme inadapté et on passe
+      // directement au suivant, sans perdre de temps à le réessayer à l'identique.
+      const msg = choice && choice.message;
+      const reason = (msg && msg.refusal) || (choice && choice.finish_reason) ||
+        (data && JSON.stringify(data).slice(0, 150)) || 'raison inconnue';
+      throw new ModelUnavailableError(`${model} : réponse vide (${reason})`, 'emptyContent');
+    }
+    const cleaned = text.trim().replace(/^```json\s*/i, '').replace(/^```\s*/, '').replace(/```\s*$/, '').trim();
+    try { return JSON.parse(cleaned); }
     catch(e){
-      const match = text.match(/\{[\s\S]*\}/);
+      const match = cleaned.match(/\{[\s\S]*\}/);
       if (match){ try { return JSON.parse(match[0]); } catch(e2){} }
-      throw new Error(`Réponse IA de secours mal formée (${model})`);
+      throw new ModelUnavailableError(`${model} : réponse mal formée (JSON invalide)`, 'malformedJson');
     }
   } catch(e){
     if (e.name === 'AbortError') throw new Error(`Délai dépassé pour ${model}`);
@@ -1751,18 +1784,26 @@ async function callOneOpenRouterModel(model, promptText, imageDataUrl, apiKey, t
   }
 }
 
-  // Un 404/400 vise un modèle précis → on passe au suivant sans attendre.
+  function invalidateOpenRouterModelCache(needsImage){
+    try { localStorage.removeItem(OPENROUTER_MODEL_CACHE_KEY + (needsImage ? '_vision' : '_text')); } catch(e){}
+  }
+
+  // Un 404/400/402 vise un modèle précis → on passe au suivant sans attendre,
+  // et on invalide le cache pour que la prochaine analyse reparte d'une liste
+  // fraîche plutôt que de retomber sur ces mêmes modèles morts pendant 24h.
   // Un 429 vise le compte entier → changer de modèle ne sert à rien, il faut
   // attendre le délai indiqué par OpenRouter avant de retenter.
   async function callOpenRouterJSON(promptText, imageDataUrl){
     const apiKey = localStorage.getItem('openrouter_api_key');
     if (!apiKey) throw new Error('Clé IA de secours manquante');
 
-    const models = await getOpenRouterModelCandidates(!!imageDataUrl);
+    const needsImage = !!imageDataUrl;
+    const models = await getOpenRouterModelCandidates(needsImage);
     let lastErr = new Error('IA de secours indisponible');
     let modelIndex = 0;
     let attempts = 0;
     const maxAttempts = Math.min(models.length + 2, 5);
+    let cacheInvalidated = false;
 
     while (attempts < maxAttempts){
       attempts++;
@@ -1773,6 +1814,10 @@ async function callOneOpenRouterModel(model, promptText, imageDataUrl, apiKey, t
         if (e instanceof NonRetryableAIError) throw e;
         lastErr = e;
         if (e instanceof ModelUnavailableError){
+          if (!cacheInvalidated && (e.code === 'http404' || e.code === 'http402' || e.code === 'http400')){
+            invalidateOpenRouterModelCache(needsImage);
+            cacheInvalidated = true;
+          }
           if (modelIndex < models.length - 1){ modelIndex++; continue; }
           throw e; // plus aucun candidat à essayer
         }
