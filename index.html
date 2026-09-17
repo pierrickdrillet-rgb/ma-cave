@@ -1760,21 +1760,26 @@ async function callOneOpenRouterModel(model, promptText, imageDataUrl, apiKey, t
       if (code === 401 || code === 403) throw new NonRetryableAIError('Clé IA de secours invalide ou refusée : ' + message);
       if (code === 400) throw new ModelUnavailableError(`${model} : ${message}`, 'http400');
       if (code === 429){
-        // OpenRouter documente précisément comment distinguer les trois causes
-        // d'un 429 (https://openrouter.ai/docs/api_reference/limits) :
-        //  - Limite OpenRouter (par minute OU par jour) : l'en-tête X-RateLimit-Limit
-        //    est présent et vaut exactement 20 (par minute, toujours) ou 50/1000
-        //    (par jour, selon crédit acheté). Attendre ne sert à rien pour le quota
-        //    journalier avant le lendemain ; changer de modèle ne sert à rien non
-        //    plus, la limite est par COMPTE, pas par modèle.
+        // OpenRouter documente précisément comment distinguer les causes d'un 429
+        // (https://openrouter.ai/docs/api_reference/limits) :
+        //  - Limite OpenRouter PAR COMPTE (par minute OU par jour) : l'en-tête
+        //    X-RateLimit-Limit est présent et vaut exactement 20 (par minute,
+        //    toujours) ou 50/1000 (par jour, selon crédit acheté).
         //  - Congestion chez le fournisseur pour CE modèle précis : pas d'en-tête
         //    X-RateLimit-*. Changer de modèle contourne le problème.
+        //
+        // IMPORTANT (confirmé par le support OpenRouter) : une tentative en échec
+        // consomme quand même une unité du quota gratuit JOURNALIER, même par
+        // minute. Autrement dit, enchaîner plusieurs modèles après une limite par
+        // COMPTE ne fait qu'épuiser le quota restant pour des échecs garantis —
+        // à traiter très différemment d'une simple congestion d'un modèle isolé.
         const limitHeader = response.headers.get('x-ratelimit-limit');
         const resetHeader = response.headers.get('x-ratelimit-reset');
         const retryAfterHeader = response.headers.get('retry-after');
         const limitNum = limitHeader ? parseInt(limitHeader, 10) : NaN;
+        const isPlatformLimit = !isNaN(limitNum); // par opposition à une congestion fournisseur
 
-        if (!isNaN(limitNum) && limitNum !== 20){
+        if (isPlatformLimit && limitNum !== 20){
           // Quota JOURNALIER épuisé (50 ou 1000 selon crédit acheté) : inutile de
           // changer de modèle ou de réessayer avant la réinitialisation, on arrête
           // tout de suite avec une explication actionnable.
@@ -1785,24 +1790,23 @@ async function callOneOpenRouterModel(model, promptText, imageDataUrl, apiKey, t
             if (!isNaN(resetDate.getTime())) resetInfo = ` (réinitialisation vers ${resetDate.toLocaleTimeString('fr-FR', { hour:'2-digit', minute:'2-digit' })})`;
           }
           throw new NonRetryableAIError(
-            `Quota gratuit OpenRouter épuisé pour aujourd'hui${resetInfo} : ${limitNum} requêtes de modèles gratuits par jour, tous modèles confondus. Ce palier passe de 50 à 1000/jour dès qu'au moins 10$ de crédit ont été achetés une fois sur le compte (le solde peut ensuite redescendre à 0€, le palier reste acquis) — voir https://openrouter.ai/settings/credits. Sinon, réessayez plus tard : le compteur se réinitialise chaque jour.`
+            `Quota gratuit OpenRouter épuisé pour aujourd'hui${resetInfo} : ${limitNum} requêtes de modèles gratuits par jour, tous modèles confondus (les tentatives en échec comptent aussi). Ce palier passe de 50 à 1000/jour dès qu'au moins 10$ de crédit ont été achetés une fois sur le compte (le solde peut ensuite redescendre à 0€, le palier reste acquis) — voir https://openrouter.ai/settings/credits. Sinon, réessayez plus tard : le compteur se réinitialise chaque jour.`
           );
         }
 
-        // Limite par minute (20 req/min, tout le compte) ou congestion fournisseur
-        // pour ce modèle : les deux sont transitoires, on retente après un court
-        // délai — en changeant de modèle quand c'est possible (utile si c'est une
-        // congestion propre à ce modèle, inoffensif sinon).
         const retrySec = retryAfterHeader ? parseFloat(retryAfterHeader) : NaN;
         const err = new ModelUnavailableError(
-          !isNaN(limitNum) ? `${model} : limite de 20 requêtes/minute atteinte (tout le compte)` : `${model} : congestion momentanée chez le fournisseur`,
+          isPlatformLimit ? `${model} : limite de 20 requêtes/minute atteinte (tout le compte)` : `${model} : congestion momentanée chez le fournisseur`,
           'http429'
         );
-        // Plafonné à 15s (et non aux 60s qu'un compte à zéro peut réellement
-        // devoir attendre) : l'appli entière est bornée à 55-65s par
-        // withTimeout côté appelant, mieux vaut échouer proprement avec un
-        // message clair que de faire attendre l'utilisateur sans retour.
-        err.retryAfterMs = !isNaN(retrySec) ? Math.min(Math.max(retrySec, 1), 15) * 1000 : 8000;
+        err.platformLimit = isPlatformLimit;
+        // Limite par compte : on respecte le vrai délai (jusqu'à 30s) plutôt que
+        // de le tronquer, car un réessai prématuré échouera à coup sûr et coûtera
+        // une unité de quota pour rien. Congestion d'un modèle précis : un court
+        // délai suffit, on change de modèle de toute façon.
+        err.retryAfterMs = !isNaN(retrySec)
+          ? Math.min(Math.max(retrySec, 1), isPlatformLimit ? 30 : 15) * 1000
+          : (isPlatformLimit ? 15000 : 8000);
         throw err;
       }
       throw new Error(`${model} : ${message}`); // 502/503 : capacité gratuite momentanément saturée
@@ -1856,6 +1860,7 @@ async function callOneOpenRouterModel(model, promptText, imageDataUrl, apiKey, t
     let attempts = 0;
     const maxAttempts = Math.min(models.length + 2, 5);
     let cacheInvalidated = false;
+    let platformLimitRetried = false; // une seule tentative supplémentaire après une limite PAR COMPTE : chaque essai en échec en coûte une unité, inutile d'en gaspiller plusieurs pour un résultat garanti identique
 
     while (attempts < maxAttempts){
       attempts++;
@@ -1870,13 +1875,22 @@ async function callOneOpenRouterModel(model, promptText, imageDataUrl, apiKey, t
             invalidateOpenRouterModelCache(needsImage);
             cacheInvalidated = true;
           }
+          if (e.code === 'http429' && e.platformLimit){
+            // Limite PAR COMPTE (minute) : changer de modèle ne sert à rien (elle
+            // s'applique à tous), et chaque essai en échec coûte une unité du
+            // quota journalier. Un seul nouvel essai, sur le MÊME modèle, après
+            // le délai réellement indiqué — puis on abandonne.
+            if (!platformLimitRetried && attempts < maxAttempts){
+              platformLimitRetried = true;
+              await new Promise(r => setTimeout(r, e.retryAfterMs));
+              continue;
+            }
+            throw e;
+          }
           if (e.code === 'http429'){
-            // Erreur transitoire par nature (limite par minute du compte, ou
-            // congestion ponctuelle chez le fournisseur pour ce modèle) : on
-            // respecte le délai indiqué avant de retenter, avec un autre modèle
-            // si la liste en propose un (utile en cas de congestion fournisseur),
-            // sinon on boucle sur le même — sans jamais dépasser maxAttempts.
-            if (attempts < maxAttempts) await new Promise(r => setTimeout(r, e.retryAfterMs || 8000));
+            // Congestion chez le fournisseur pour CE modèle précis : changer de
+            // modèle est la parade recommandée par OpenRouter, avec un court délai.
+            if (attempts < maxAttempts) await new Promise(r => setTimeout(r, e.retryAfterMs || 4000));
             modelIndex = modelIndex < models.length - 1 ? modelIndex + 1 : 0;
             continue;
           }
