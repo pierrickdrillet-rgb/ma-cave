@@ -1743,14 +1743,66 @@ async function callOneOpenRouterModel(model, promptText, imageDataUrl, apiKey, t
       // 402 = crédit insuffisant / modèle payant sélectionné par erreur : inutile de
       // retenter le même modèle, mais on peut essayer un AUTRE modèle gratuit.
       if (code === 402) throw new ModelUnavailableError(`Modèle payant ou crédit épuisé (${model}) : ${message}`, 'http402');
-      if (code === 404) throw new ModelUnavailableError(`${model} : ${message}`, 'http404');
+      if (code === 404){
+        // Restriction de compte (pas de problème de modèle précis) : si le
+        // workspace OpenRouter exige la "Zero Data Retention", tous les
+        // modèles gratuits sont exclus d'un coup (ils ne sont quasiment
+        // jamais certifiés ZDR). Inutile d'essayer les autres candidats,
+        // ils échoueront identiquement — on arrête tout de suite avec un
+        // message actionnable plutôt que de recycler la liste pour rien.
+        if (/guardrail|zero data retention|\bzdr\b/i.test(message)){
+          throw new NonRetryableAIError(
+            "Votre workspace OpenRouter exige la confidentialité \"Zero Data Retention\", que les modèles gratuits ne proposent presque jamais : cela exclut tout le secours IA. Désactivez cette exigence (au moins pour les modèles gratuits) sur https://openrouter.ai/workspaces/default/guardrails, puis réessayez."
+          );
+        }
+        throw new ModelUnavailableError(`${model} : ${message}`, 'http404');
+      }
       if (code === 401 || code === 403) throw new NonRetryableAIError('Clé IA de secours invalide ou refusée : ' + message);
       if (code === 400) throw new ModelUnavailableError(`${model} : ${message}`, 'http400');
       if (code === 429){
+        // OpenRouter documente précisément comment distinguer les trois causes
+        // d'un 429 (https://openrouter.ai/docs/api_reference/limits) :
+        //  - Limite OpenRouter (par minute OU par jour) : l'en-tête X-RateLimit-Limit
+        //    est présent et vaut exactement 20 (par minute, toujours) ou 50/1000
+        //    (par jour, selon crédit acheté). Attendre ne sert à rien pour le quota
+        //    journalier avant le lendemain ; changer de modèle ne sert à rien non
+        //    plus, la limite est par COMPTE, pas par modèle.
+        //  - Congestion chez le fournisseur pour CE modèle précis : pas d'en-tête
+        //    X-RateLimit-*. Changer de modèle contourne le problème.
+        const limitHeader = response.headers.get('x-ratelimit-limit');
+        const resetHeader = response.headers.get('x-ratelimit-reset');
         const retryAfterHeader = response.headers.get('retry-after');
+        const limitNum = limitHeader ? parseInt(limitHeader, 10) : NaN;
+
+        if (!isNaN(limitNum) && limitNum !== 20){
+          // Quota JOURNALIER épuisé (50 ou 1000 selon crédit acheté) : inutile de
+          // changer de modèle ou de réessayer avant la réinitialisation, on arrête
+          // tout de suite avec une explication actionnable.
+          let resetInfo = '';
+          if (resetHeader){
+            const resetNum = parseInt(resetHeader, 10);
+            const resetDate = new Date(resetNum < 1e12 ? resetNum * 1000 : resetNum); // secondes vs millisecondes
+            if (!isNaN(resetDate.getTime())) resetInfo = ` (réinitialisation vers ${resetDate.toLocaleTimeString('fr-FR', { hour:'2-digit', minute:'2-digit' })})`;
+          }
+          throw new NonRetryableAIError(
+            `Quota gratuit OpenRouter épuisé pour aujourd'hui${resetInfo} : ${limitNum} requêtes de modèles gratuits par jour, tous modèles confondus. Ce palier passe de 50 à 1000/jour dès qu'au moins 10$ de crédit ont été achetés une fois sur le compte (le solde peut ensuite redescendre à 0€, le palier reste acquis) — voir https://openrouter.ai/settings/credits. Sinon, réessayez plus tard : le compteur se réinitialise chaque jour.`
+          );
+        }
+
+        // Limite par minute (20 req/min, tout le compte) ou congestion fournisseur
+        // pour ce modèle : les deux sont transitoires, on retente après un court
+        // délai — en changeant de modèle quand c'est possible (utile si c'est une
+        // congestion propre à ce modèle, inoffensif sinon).
         const retrySec = retryAfterHeader ? parseFloat(retryAfterHeader) : NaN;
-        const err = new Error(`${model} : limite de requêtes atteinte (modèles gratuits)`);
-        err.retryAfterMs = !isNaN(retrySec) ? Math.min(Math.max(retrySec, 1), 15) * 1000 : 5000;
+        const err = new ModelUnavailableError(
+          !isNaN(limitNum) ? `${model} : limite de 20 requêtes/minute atteinte (tout le compte)` : `${model} : congestion momentanée chez le fournisseur`,
+          'http429'
+        );
+        // Plafonné à 15s (et non aux 60s qu'un compte à zéro peut réellement
+        // devoir attendre) : l'appli entière est bornée à 55-65s par
+        // withTimeout côté appelant, mieux vaut échouer proprement avec un
+        // message clair que de faire attendre l'utilisateur sans retour.
+        err.retryAfterMs = !isNaN(retrySec) ? Math.min(Math.max(retrySec, 1), 15) * 1000 : 8000;
         throw err;
       }
       throw new Error(`${model} : ${message}`); // 502/503 : capacité gratuite momentanément saturée
@@ -1817,6 +1869,16 @@ async function callOneOpenRouterModel(model, promptText, imageDataUrl, apiKey, t
           if (!cacheInvalidated && (e.code === 'http404' || e.code === 'http402' || e.code === 'http400')){
             invalidateOpenRouterModelCache(needsImage);
             cacheInvalidated = true;
+          }
+          if (e.code === 'http429'){
+            // Erreur transitoire par nature (limite par minute du compte, ou
+            // congestion ponctuelle chez le fournisseur pour ce modèle) : on
+            // respecte le délai indiqué avant de retenter, avec un autre modèle
+            // si la liste en propose un (utile en cas de congestion fournisseur),
+            // sinon on boucle sur le même — sans jamais dépasser maxAttempts.
+            if (attempts < maxAttempts) await new Promise(r => setTimeout(r, e.retryAfterMs || 8000));
+            modelIndex = modelIndex < models.length - 1 ? modelIndex + 1 : 0;
+            continue;
           }
           if (modelIndex < models.length - 1){ modelIndex++; continue; }
           throw e; // plus aucun candidat à essayer
