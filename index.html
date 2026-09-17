@@ -187,6 +187,18 @@
   <div id="helpModal" class="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4 hidden" onclick="if(event.target===this) closeHelpModal()">
     <div class="rounded-2xl w-full max-w-md p-6 shadow-2xl relative overflow-y-auto" style="background:var(--bg-900);border:1px solid var(--line);max-height:90vh;max-height:90dvh">
       <h2 class="font-serif-display text-[20px] mb-3" style="color:var(--gold)">Sauvegarde & données</h2>
+
+      <details class="mb-5 rounded-xl overflow-hidden" style="background:var(--bg-950);border:1px solid var(--line)">
+        <summary class="cursor-pointer px-4 py-3 text-[13px] font-medium select-none" style="color:var(--gold)">📖 Mode d'emploi & dépannage IA</summary>
+        <div class="px-4 pb-4 text-[12px] leading-relaxed space-y-2.5" style="color:var(--muted)">
+          <p><strong style="color:var(--cream)">Ajouter une bouteille :</strong> photographiez l'étiquette — le nom, le type et le profil de dégustation se remplissent en général tout seuls — ou saisissez tout à la main. Relisez toujours avant d'enregistrer : l'IA se trompe parfois.</p>
+          <p><strong style="color:var(--cream)">Comment marche l'IA :</strong> Gemini est utilisé en priorité. S'il est indisponible (clé absente/invalide, quota épuisé), l'appli bascule automatiquement sur la clé de secours OpenRouter si elle est renseignée. Un message <span style="color:var(--gold)">↩️ Secours utilisé</span> apparaît alors sous le résultat.</p>
+          <p><strong style="color:var(--cream)">Si l'IA échoue :</strong> le message donne la cause précise. Les plus fréquentes — clé invalide (à revérifier ci-dessous), quota gratuit épuisé (OpenRouter sans crédit : 50 requêtes/jour tous modèles confondus, y compris les échecs — réessayez plus tard, ou achetez 10$ de crédit une fois pour passer à 1000/jour), ou restriction "Zero Data Retention" activée sur le workspace OpenRouter (à assouplir sur openrouter.ai, Guardrails → Model & Provider Access, pour les modèles gratuits). Dans tous les cas, la fiche reste utilisable en saisie manuelle.</p>
+          <p><strong style="color:var(--cream)">Partager la cave :</strong> connectez Google Drive ci-dessous, créez une cave partagée, puis invitez l'autre personne par email. Chacun modifie ensuite depuis son propre compte ; les modifications se synchronisent au fil de l'eau.</p>
+          <p><strong style="color:var(--cream)">Sauvegarde manuelle :</strong> "Exporter une sauvegarde" télécharge un fichier JSON de toute la cave. "Importer" le restaure — n'utilisez cette option qu'avec un fichier de confiance (ou re-exporté par vous-même), puisqu'un fichier corrompu pourrait introduire des données invalides.</p>
+        </div>
+      </details>
+
       <p id="storageExplain" class="text-[13px] leading-relaxed mb-5" style="color:var(--muted)"></p>
 
       <div id="driveSection" class="mb-5"></div>
@@ -425,6 +437,7 @@
   let bottles = [];
   let activeCategory = 'Tous';
   let bottlesLoaded = false;
+  let modalSession = 0; // voir openModal() : protège contre une analyse IA en fond qui se termine après un changement de formulaire
 
   // ====================================================================
   // Synchronisation Google Drive — partagée entre deux comptes Google
@@ -1159,7 +1172,7 @@ Format exact :
 Champ "shoppingSuggestion" : si goodMatch est false, décris en une phrase le type de bouteille idéal à acheter pour un accord parfait (cépage, appellation ou style de vin/spiritueux — jamais une marque précise). Si goodMatch est true, mets une chaîne vide.
 
 Exemple pour un magret de canard, si la cave contenait un Madiran : {"reason":"Les tanins fermes du Madiran tiennent tête au gras du canard sans l'écraser.","picks":["Château Montus"],"goodMatch":true,"shoppingSuggestion":""}`;
-      const parsed = await withTimeout(callAIJSON(prompt), 55000, "L'IA met trop de temps à répondre");
+      const { data: parsed, provider, model: usedModel } = await withTimeout(callAIJSON(prompt), 55000, "L'IA met trop de temps à répondre");
       const rawPicks = Array.isArray(parsed.picks) ? parsed.picks.slice(0, 3) : [];
 
       // Les modèles gratuits sont plus susceptibles d'halluciner une bouteille
@@ -1189,7 +1202,10 @@ Exemple pour un magret de canard, si la cave contenait un Madiran : {"reason":"L
       });
 
       const rankIcons = ['🥇', '🥈', '🥉'];
-      let html = `<p style="color:var(--gold)">${esc(parsed.reason || '')}</p>`;
+      const fallbackNote = provider === 'openrouter'
+        ? `<p class="text-[11px] mb-1.5" style="color:var(--muted)">↩️ Secours utilisé (${esc(usedModel)}) — Gemini indisponible pour cette suggestion.</p>`
+        : '';
+      let html = `${fallbackNote}<p style="color:var(--gold)">${esc(parsed.reason || '')}</p>`;
       if (pickedBottles.length){
         html += `<div class="flex flex-col gap-2 mt-2">` + pickedBottles.map((b, i) => {
           const cat = CAT_BY_KEY[b.category];
@@ -1309,7 +1325,7 @@ async function markBottleUsedFromSuggestion(id, btnEl){
       return `
         <div class="flex items-center gap-3.5 rounded-xl px-4 py-3.5 transition-colors" style="background:var(--bg-900);border-left:4px solid ${cat.color}">
           <div class="shrink-0 w-12 h-12 rounded-lg overflow-hidden flex items-center justify-center text-xl" style="background:var(--bg-950);border:1px solid var(--line)">
-            ${b.image ? `<img src="${b.image}" class="w-full h-full object-cover" alt="">` : cat.emoji}
+            ${b.image ? `<img src="${esc(b.image)}" class="w-full h-full object-cover" alt="">` : cat.emoji}
           </div>
           <div class="flex-1 min-w-0">
             <div class="flex items-center gap-1.5 flex-wrap">
@@ -1318,7 +1334,7 @@ async function markBottleUsedFromSuggestion(id, btnEl){
             </div>
             ${b.detail ? `<p class="text-[13px] mt-1 leading-relaxed line-clamp-3" style="color:#cabcae">${esc(b.detail)}</p>` : ''}
             <div class="flex items-center gap-2 mt-1 flex-wrap">
-              <span class="text-[11px] px-2 py-0.5 rounded-full" style="${statusStyle}">${b.status}</span>
+              <span class="text-[11px] px-2 py-0.5 rounded-full" style="${statusStyle}">${esc(b.status)}</span>
               ${b.price ? `<span class="text-[11px]" style="color:var(--gold)">${esc(b.price)}</span>` : ''}
               ${b.degree ? `<span class="text-[11px]" style="color:var(--muted)">${esc(b.degree)}% vol</span>` : ''}
             </div>
@@ -1374,6 +1390,11 @@ async function markBottleUsedFromSuggestion(id, btnEl){
   }
 
   function openModal(id){
+    // Incrémenté à chaque ouverture : si une analyse IA lancée pour un
+    // formulaire précédent (resté en fond après une fermeture, ou pour une
+    // AUTRE bouteille) se termine après coup, elle vérifie ce jeton et
+    // n'écrase plus silencieusement le formulaire actuellement affiché.
+    modalSession++;
     document.getElementById('bottleModal').classList.remove('hidden');
     document.getElementById('photoCaptureInput').value = '';
     document.getElementById('aiFeedback').textContent = "Prenez une photo nette de l'étiquette : le nom et la catégorie seront proposés automatiquement, à vérifier avant d'enregistrer.";
@@ -1427,33 +1448,47 @@ async function markBottleUsedFromSuggestion(id, btnEl){
     el.textContent = msg;
   }
 
+  let bulkActionRunning = false; // évite qu'un double-clic lance deux compressions/reclassements en parallèle sur le même tableau bottles
+
   async function optimizeStoredImages(){
+    if (bulkActionRunning){ showToast('Une opération est déjà en cours…', 'error'); return; }
     const targets = bottles.filter(b => !b.deleted && b.image && b.image.length > 20000);
     if (!targets.length){ showToast('Aucune photo à compresser'); return; }
     if (!confirm(`Compresser ${targets.length} photo(s) pour réduire le poids de la sauvegarde ?`)) return;
+    bulkActionRunning = true;
     showToast('Compression en cours…');
     let done = 0;
-    for (const b of targets){
-      try {
-        const img = await loadImageFromDataUrl(b.image);
-        b.image = makeThumbnail(img, 220, 0.6);
-        b.updatedAt = Date.now();
-        done++;
-      } catch(e){ console.error(e); }
+    try {
+      for (const b of targets){
+        try {
+          const img = await loadImageFromDataUrl(b.image);
+          b.image = makeThumbnail(img, 220, 0.6);
+          b.updatedAt = Date.now();
+          done++;
+        } catch(e){ console.error(e); }
+      }
+      await saveData();
+      updateDataSizeInfo();
+      showToast(`${done} photo(s) compressée(s)`);
+    } finally {
+      bulkActionRunning = false;
     }
-    await saveData();
-    updateDataSizeInfo();
-    showToast(`${done} photo(s) compressée(s)`);
   }
 
   async function reclassifyArrangedBottles(){
+    if (bulkActionRunning){ showToast('Une opération est déjà en cours…', 'error'); return; }
     const targets = bottles.filter(b => !b.deleted && b.category === 'spiritueux' &&
       /arrang|infus|limoncello|liqueur|eau de vie|a l eau de vie/.test(normalize(`${b.name} ${b.detail || ''}`)));
     if (!targets.length){ showToast('Aucun arrangé détecté automatiquement'); return; }
     if (!confirm(`Reclasser ${targets.length} bouteille(s) détectée(s) comme arrangée(s) ?`)) return;
-    targets.forEach(b => { b.category = 'arrange'; b.updatedAt = Date.now(); });
-    await saveData();
-    showToast('Reclassement effectué');
+    bulkActionRunning = true;
+    try {
+      targets.forEach(b => { b.category = 'arrange'; b.updatedAt = Date.now(); });
+      await saveData();
+      showToast('Reclassement effectué');
+    } finally {
+      bulkActionRunning = false;
+    }
   }
 
   async function handleFormSubmit(e){
@@ -1467,7 +1502,7 @@ async function markBottleUsedFromSuggestion(id, btnEl){
       name: document.getElementById('nameInput').value.trim(),
       subtype: document.getElementById('subtypeInput').value.trim(),
       detail: document.getElementById('detailInput').value.trim(),
-      qty: parseInt(document.getElementById('qtyInput').value) || 0,
+      qty: Math.max(0, parseInt(document.getElementById('qtyInput').value) || 0), // défense en profondeur : le navigateur bloque déjà les valeurs négatives via min="0", mais on ne s'y fie pas exclusivement
       status: document.getElementById('statusInput').value,
       price: document.getElementById('priceInput').value.trim(),
       notes: document.getElementById('notesInput').value.trim(),
@@ -1586,7 +1621,12 @@ async function markBottleUsedFromSuggestion(id, btnEl){
     } catch(e){}
 
     try {
-      const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey}&pageSize=200`);
+      // Clé passée en en-tête plutôt qu'en paramètre d'URL : évite qu'elle se
+      // retrouve dans l'historique du navigateur, les logs de proxy ou tout
+      // autre journal qui capture des URLs sans capturer les en-têtes.
+      const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?pageSize=200`, {
+        headers: { 'x-goog-api-key': apiKey }
+      });
       if (!res.ok) throw new Error('liste de modèles indisponible');
       const data = await res.json();
       const all = Array.isArray(data.models) ? data.models : [];
@@ -1634,9 +1674,9 @@ async function markBottleUsedFromSuggestion(id, btnEl){
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
     try {
-      const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`, {
+      const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey }, // en-tête plutôt qu'en URL, cf. commentaire plus haut
         signal: controller.signal,
         body: JSON.stringify({
           contents: [{ parts }],
@@ -1709,7 +1749,8 @@ async function markBottleUsedFromSuggestion(id, btnEl){
     for (let pass = 0; pass < 2; pass++){
       for (const model of models){
         try {
-          return await callOneGeminiModel(model, parts, geminiKey, 10000);
+          const data = await callOneGeminiModel(model, parts, geminiKey, 10000);
+          return { data, provider: 'gemini', model };
         } catch(e){
           if (e instanceof NonRetryableAIError) throw e;
           lastErr = e;
@@ -1988,7 +2029,7 @@ async function callOneOpenRouterModel(model, promptText, imageDataUrl, apiKey, t
       attempts++;
       const model = models[Math.min(modelIndex, models.length - 1)];
       try {
-        return await callOneOpenRouterModel(model, promptText, imageDataUrl, apiKey, 20000);
+        { const data = await callOneOpenRouterModel(model, promptText, imageDataUrl, apiKey, 20000); return { data, provider: 'openrouter', model }; }
       } catch(e){
         if (e instanceof NonRetryableAIError) throw e;
         lastErr = e;
@@ -2029,7 +2070,10 @@ async function callOneOpenRouterModel(model, promptText, imageDataUrl, apiKey, t
   // premier (si une clé est enregistrée), puis bascule automatiquement sur
   // OpenRouter en cas d'échec (quota épuisé, panne, modèle retiré...) si une
   // clé de secours est enregistrée. N'échoue que si aucun des deux
-  // fournisseurs disponibles n'a réussi.
+  // fournisseurs disponibles n'a réussi. Retourne { data, provider, model } :
+  // "data" est l'objet JSON utile, "provider" ('gemini'|'openrouter') et
+  // "model" permettent à l'appelant d'indiquer à l'utilisateur quand c'est le
+  // secours qui a répondu plutôt que Gemini.
   async function callAIJSON(promptText, imageDataUrl){
     const geminiKey = localStorage.getItem('gemini_api_key');
     const backupKey = localStorage.getItem('openrouter_api_key');
@@ -2123,6 +2167,7 @@ Rappel final : ta réponse doit être EXCLUSIVEMENT l'objet JSON ci-dessus rempl
     }, 6000);
     submitBtn.disabled = true;
     submitBtn.style.opacity = '0.5';
+    const session = modalSession; // capturé maintenant : voir openModal()
 
     try {
       const geminiKey = localStorage.getItem('gemini_api_key');
@@ -2134,7 +2179,8 @@ Rappel final : ta réponse doit être EXCLUSIVEMENT l'objet JSON ci-dessus rempl
       if (storeDataUrl) document.getElementById('imageUrlInput').value = storeDataUrl;
       updateRetryButtonVisibility();
 
-      const parsed = await withTimeout(callAIJSON(AI_LABEL_PROMPT, analysisDataUrl), 65000, "L'IA met trop de temps à répondre");
+      const { data: parsed, provider, model: usedModel } = await withTimeout(callAIJSON(AI_LABEL_PROMPT, analysisDataUrl), 65000, "L'IA met trop de temps à répondre");
+      if (session !== modalSession) return; // le formulaire a changé entre-temps : ce résultat n'est plus pertinent
 
       document.getElementById('nameInput').value = parsed.nom || '';
       document.getElementById('catInput').value = parsed.categorie || '';
@@ -2147,16 +2193,22 @@ Rappel final : ta réponse doit être EXCLUSIVEMENT l'objet JSON ci-dessus rempl
 
       const filledCount = Object.keys(parsed.criteres || {}).length;
       const degreeNote = parsed.degre ? ` et le degré (${esc(parsed.degre)}%)` : '';
-      feedback.innerHTML = `<span style="color:#7fbf9c">✅ Bouteille identifiée !</span> <span style="color:var(--muted)">${filledCount ? `${filledCount} critère(s) de dégustation` : 'Aucun critère'} proposé(s)${degreeNote}. Relisez et corrigez avant d'enregistrer — c'est votre palais qui a le dernier mot.</span>`;
+      const fallbackNote = provider === 'openrouter'
+        ? ` <span style="color:var(--gold)">↩️ Secours utilisé (${esc(usedModel)}) — Gemini indisponible pour cette analyse.</span>`
+        : '';
+      feedback.innerHTML = `<span style="color:#7fbf9c">✅ Bouteille identifiée !</span> <span style="color:var(--muted)">${filledCount ? `${filledCount} critère(s) de dégustation` : 'Aucun critère'} proposé(s)${degreeNote}. Relisez et corrigez avant d'enregistrer — c'est votre palais qui a le dernier mot.</span>${fallbackNote}`;
 
     } catch(err) {
+      if (session !== modalSession) return;
       console.error(err);
       const detail = err && err.message ? esc(err.message) : '';
       feedback.innerHTML = `<span style="color:#e08a97">⚠️ L'IA n'a pas pu lire cette étiquette${detail ? ' : ' + detail : ''}.</span> <span style="color:var(--muted)">Réessayez avec le bouton ci-dessus (une photo bien éclairée, sans reflet, aide beaucoup), ou remplissez la fiche à la main.</span>`;
     } finally {
       clearInterval(ticker);
-      submitBtn.disabled = false;
-      submitBtn.style.opacity = '1';
+      if (session === modalSession){
+        submitBtn.disabled = false;
+        submitBtn.style.opacity = '1';
+      }
     }
   }
 
@@ -2262,6 +2314,14 @@ Rappel final : ta réponse doit être EXCLUSIVEMENT l'objet JSON ci-dessus rempl
     if (savedKey) document.getElementById('geminiKeyInput').value = savedKey;
     const savedBackupKey = localStorage.getItem('openrouter_api_key');
     if (savedBackupKey) document.getElementById('openrouterKeyInput').value = savedBackupKey;
+  });
+
+  // Échap referme la fenêtre ouverte (bouteille ou aide), comme le clic en
+  // dehors — pratique au clavier, sans rien changer au comportement existant.
+  document.addEventListener('keydown', (e) => {
+    if (e.key !== 'Escape') return;
+    if (!document.getElementById('bottleModal').classList.contains('hidden')) closeModal();
+    else if (!document.getElementById('helpModal').classList.contains('hidden')) closeHelpModal();
   });
 </script>
 </body>
