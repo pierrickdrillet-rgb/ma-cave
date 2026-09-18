@@ -583,10 +583,36 @@
 
   const TOMBSTONE_TTL_MS = 1000 * 60 * 60 * 24 * 180;
 
+  // BUG DE SÉCURITÉ CORRIGÉ : id/qty sont insérés tels quels dans des
+  // attributs onclick="...(${b.id})" et du contenu affiché, sans
+  // échappement HTML (ça n'aurait d'ailleurs aucun sens pour un nombre en
+  // position de code JS). Si une bouteille venue de l'extérieur (fichier
+  // importé, ou synchronisation Google Drive avec quelqu'un dont le compte
+  // serait compromis) avait un id/qty qui soit une CHAÎNE plutôt qu'un
+  // nombre, elle pourrait casser hors de l'attribut et injecter du
+  // HTML/JS arbitraire. Toute bouteille externe passe donc par ici avant
+  // d'entrer dans bottles, pour garantir que ces champs sont de vrais
+  // nombres finis quelle que soit la source.
+  function sanitizeBottle(b){
+    if (!b || typeof b !== 'object') return null;
+    let id = typeof b.id === 'number' && Number.isFinite(b.id) ? b.id : parseInt(b.id, 10);
+    if (!Number.isFinite(id)) id = Math.round(Date.now() + Math.random() * 100000);
+    let qty = typeof b.qty === 'number' && Number.isFinite(b.qty) ? b.qty : parseInt(b.qty, 10);
+    qty = Number.isFinite(qty) ? Math.max(0, qty) : 0;
+    let updatedAt = typeof b.updatedAt === 'number' && Number.isFinite(b.updatedAt) ? b.updatedAt : Date.now();
+    return { ...b, id, qty, updatedAt, deleted: !!b.deleted };
+  }
+
+  function sanitizeBottleList(list){
+    return (Array.isArray(list) ? list : []).map(sanitizeBottle).filter(Boolean);
+  }
+
   function mergeBottles(localList, remoteList){
+    const local = sanitizeBottleList(localList);
+    const remote = sanitizeBottleList(remoteList);
     const map = new Map();
-    (remoteList || []).forEach(b => map.set(b.id, b));
-    (localList || []).forEach(b => {
+    remote.forEach(b => map.set(b.id, b));
+    local.forEach(b => {
       const existing = map.get(b.id);
       if (!existing || (b.updatedAt || 0) >= (existing.updatedAt || 0)) map.set(b.id, b);
     });
@@ -751,8 +777,7 @@
     let raw = null;
     try { raw = localStorage.getItem('bottles'); } catch(e){}
     try {
-      bottles = raw ? JSON.parse(raw) : [];
-      if (!Array.isArray(bottles)) bottles = [];
+      bottles = sanitizeBottleList(raw ? JSON.parse(raw) : []);
     } catch(e){ bottles = []; }
     bottlesLoaded = true;
     updateStorageIndicator();
@@ -1107,7 +1132,12 @@
               <p class="text-[11.5px] truncate" style="color:var(--muted)">${esc(b.detail || (cat ? cat.label : ''))}</p>
             </div>
           </div>
-          <button type="button" onclick="markBottleUsedFromSuggestion(${b.id}, this)" title="Marquer comme servie (-1 en stock)" class="text-[11px] shrink-0 ml-2 px-2.5 py-1 rounded-full transition" style="background:var(--bg-900);border:1px solid var(--line);color:var(--muted)">✅ ×${b.qty}</button>
+          <div class="flex items-center gap-1.5 shrink-0 ml-2">
+            <button type="button" onclick="openModal(${b.id})" title="Voir la fiche complète" aria-label="Voir la fiche complète" class="p-1.5 rounded-lg transition" style="color:var(--muted);background:var(--bg-900);border:1px solid var(--line)">
+              <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/></svg>
+            </button>
+            <button type="button" onclick="markBottleUsedFromSuggestion(${b.id}, this)" title="Marquer comme servie (-1 en stock)" class="text-[11px] px-2.5 py-1 rounded-full transition" style="background:var(--bg-900);border:1px solid var(--line);color:var(--muted)">✅ ×${b.qty}</button>
+          </div>
         </div>`;
       }).join('') + `</div>`;
     } else {
@@ -1216,6 +1246,9 @@ Exemple pour un magret de canard, si la cave contenait un Madiran : {"reason":"L
               <p class="text-[14px] font-medium truncate" style="color:var(--cream)">${b.subtype ? `<span class="text-[9.5px] font-bold tracking-wide px-1 py-0.5 rounded mr-1" style="background:${(cat?cat.color:'#a89a8d')}2e;color:${cat?cat.color:'#a89a8d'}">${esc(b.subtype.toUpperCase())}</span>` : ''}${esc(b.name)}</p>
               <p class="text-[11.5px] truncate" style="color:var(--muted)">${esc(b.detail || (cat ? cat.label : ''))}</p>
             </div>
+            <button type="button" onclick="openModal(${b.id})" title="Voir la fiche complète" aria-label="Voir la fiche complète" class="p-1.5 rounded-lg shrink-0 transition" style="color:var(--muted);background:var(--bg-900);border:1px solid var(--line)">
+              <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/></svg>
+            </button>
             <button type="button" onclick="markBottleUsedFromSuggestion(${b.id}, this)" title="Marquer comme servie (-1 en stock)" class="text-[11px] shrink-0 px-2.5 py-1 rounded-full transition" style="background:var(--bg-900);border:1px solid var(--line);color:var(--muted)">✅ ×${b.qty}</button>
           </div>`;
         }).join('') + `</div>`;
@@ -2261,10 +2294,9 @@ Rappel final : ta réponse doit être EXCLUSIVEMENT l'objet JSON ci-dessus rempl
           } catch(err){}
         }
         const importedIds = new Set();
-        const imported = parsed.map(b => {
-          const id = b.id || Math.round(Date.now() + Math.random() * 1000);
-          importedIds.add(id);
-          return { ...b, id, updatedAt: now, deleted: false };
+        const imported = sanitizeBottleList(parsed).map(b => {
+          importedIds.add(b.id);
+          return { ...b, updatedAt: now, deleted: false };
         });
         const tombstoned = bottles
           .filter(b => !b.deleted && !importedIds.has(b.id))
