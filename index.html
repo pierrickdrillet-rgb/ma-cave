@@ -77,6 +77,7 @@
         <input type="search" id="searchInput" name="cave-search-query" oninput="renderApp()" placeholder="Rechercher dans votre cave…" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" class="w-full rounded-xl pl-10 pr-4 py-3 text-[14px] transition" style="background:var(--bg-900);border:1px solid var(--line);color:var(--cream)">
       </div>
       <div class="flex gap-2 overflow-x-auto pb-1" id="categoryFilters"></div>
+      <div class="flex gap-2" id="extraFilters"></div>
     </div>
 
     <div id="inventoryList" class="flex flex-col gap-2.5"></div>
@@ -116,6 +117,8 @@
             <option value="Calvados"><option value="Limoncello"><option value="Liqueur">
             <option value="Champagne"><option value="Crémant"><option value="Bordeaux"><option value="Bourgogne">
             <option value="Côtes du Rhône"><option value="Porto"><option value="Muscat">
+            <option value="Blonde"><option value="Ambrée"><option value="Brune"><option value="Blanche">
+            <option value="IPA"><option value="Triple"><option value="Stout"><option value="Pils">
           </datalist>
           <p class="text-[11.5px] mt-1" style="color:var(--muted)">Affiché en badge à côté du nom pour l'identifier d'un coup d'œil.</p>
         </div>
@@ -142,9 +145,15 @@
           </div>
           <p class="text-[11.5px] mb-3" style="color:var(--muted)">Pour comparer vos bouteilles d'un coup d'œil dans la liste.</p>
           <div id="scoreInputs" class="flex flex-col gap-2.5"></div>
-          <div class="mt-3 pt-3" style="border-top:1px solid var(--line)">
-            <label class="block text-[12.5px] font-medium mb-1" style="color:var(--muted)">Degré <span class="font-normal">(% vol, facultatif)</span></label>
-            <input type="number" id="degreInput" min="0" max="100" step="0.1" placeholder="Ex. 13.5" class="w-28 rounded-xl px-3 py-2 text-[14px]" style="background:var(--bg-900);border:1px solid var(--line);color:var(--cream)">
+          <div class="mt-3 pt-3 flex items-end gap-4 flex-wrap" style="border-top:1px solid var(--line)">
+            <div>
+              <label class="block text-[12.5px] font-medium mb-1" style="color:var(--muted)">Degré <span class="font-normal">(% vol, facultatif)</span></label>
+              <input type="number" id="degreInput" min="0" max="100" step="0.1" placeholder="Ex. 13.5" class="w-28 rounded-xl px-3 py-2 text-[14px]" style="background:var(--bg-900);border:1px solid var(--line);color:var(--cream)">
+            </div>
+            <label class="flex items-center gap-2 pb-2 cursor-pointer">
+              <input type="checkbox" id="sansAlcoolInput" class="w-4 h-4 rounded cursor-pointer" style="accent-color:var(--gold)" onchange="if(this.checked) document.getElementById('degreInput').value='0'">
+              <span class="text-[12.5px]" style="color:var(--cream)">🚫 Sans alcool</span>
+            </label>
           </div>
         </div>
 
@@ -161,6 +170,14 @@
               <option value="Terminé">Terminé</option>
             </select>
           </div>
+        </div>
+
+        <div class="p-3.5 rounded-xl flex items-start gap-3" style="background:var(--bg-950);border:1px solid var(--line)">
+          <input type="checkbox" id="exceptionalInput" class="mt-0.5 w-4 h-4 shrink-0 rounded cursor-pointer" style="accent-color:var(--gold)">
+          <label for="exceptionalInput" class="cursor-pointer">
+            <span class="text-[13px] font-medium block" style="color:var(--gold)">⭐ Bouteille d'exception</span>
+            <span class="text-[11.5px] block mt-0.5" style="color:var(--muted)">À réserver pour une occasion particulière — pas à ouvrir avec n'importe qui.</span>
+          </label>
         </div>
 
         <div>
@@ -257,6 +274,7 @@
     { key:'blanc', label:'Vin blanc', color:'#c9a15a', emoji:'🥂' },
     { key:'rose', label:'Vin rosé', color:'#d98a95', emoji:'🌸' },
     { key:'bulles', label:'Bulles', color:'#e8c874', emoji:'🍾' },
+    { key:'biere', label:'Bière', color:'#d99a35', emoji:'🍺' },
     { key:'cuit', label:'Vin cuit / apéritif', color:'#b0703a', emoji:'🍯' },
     { key:'spiritueux', label:'Spiritueux', color:'#8a5a2b', emoji:'🥃' },
     { key:'arrange', label:'Infusions, arrangés & liqueurs', color:'#c07a3e', emoji:'🫙' },
@@ -277,6 +295,7 @@
     mineralite:    { label:'Minéralité',    hint:"Le côté pierre à fusil, craie, eau de source. Fréquent sur les blancs secs.", low:'absente', high:'très minéral' },
     fraicheur:     { label:'Fraîcheur',     hint:"L'effet désaltérant, celui qui donne envie d'un deuxième verre en terrasse.", low:'lourd', high:'très rafraîchissant' },
     effervescence: { label:'Effervescence', hint:"La bulle : fine et discrète, ou franchement pétillante ?", low:'perlant', high:'très pétillant' },
+    amertume:      { label:'Amertume',      hint:"Le côté amer qui persiste en bouche, apporté par le houblon.", low:'douce', high:'très amère' },
     finesse:       { label:'Finesse',       hint:"L'élégance de l'ensemble, par opposition à quelque chose de rustique.", low:'rustique', high:'très fin' },
     douceur:       { label:'Douceur',       hint:"La sensation sucrée en bouche.", low:'très sec', high:'très sucré' },
     longueur:      { label:'Longueur',      hint:"Combien de temps le goût reste après avoir avalé.", low:'court', high:'très long' },
@@ -291,6 +310,7 @@
     blanc:       ['fruit', 'acidite', 'mineralite', 'puissance'],
     rose:        ['fruit', 'acidite', 'fraicheur'],
     bulles:      ['fruit', 'acidite', 'effervescence', 'finesse'],
+    biere:       ['fruit', 'amertume', 'effervescence', 'puissance'],
     cuit:        ['douceur', 'puissance', 'longueur', 'complexite'],
     spiritueux:  ['puissance', 'douceur', 'boise', 'longueur'],
     arrange:     ['douceur', 'fruit', 'puissance', 'originalite'],
@@ -418,16 +438,16 @@
   ];
 
   const PAIRING_RULES = [
-    { keywords:['choucroute'], ideal:['blanc','bulles'], reason:"Une choucroute veut de la fraîcheur et de l'acidité : un blanc sec (type riesling) ou des bulles font l'affaire." },
+    { keywords:['choucroute'], ideal:['blanc','bulles','biere'], reason:"Une choucroute veut de la fraîcheur et de l'acidité : un blanc sec (type riesling), des bulles ou une bière blonde bien fraîche font l'affaire." },
     { keywords:['saucisse','lentille','mijoté','pot au feu','potée','bourguignon','daube'], ideal:['rouge'], reason:"Un plat mijoté et rustique appelle un rouge charpenté mais peu acide, pour accompagner sans écraser." },
     { keywords:['poisson','fruits de mer','saumon','crevette','huître','sushi','coquillage'], ideal:['blanc','bulles','rose'], reason:"Poissons et fruits de mer s'accordent naturellement avec un blanc vif, un rosé ou des bulles." },
     { keywords:['volaille','poulet','dinde','pintade'], ideal:['blanc','rouge'], reason:"La volaille est polyvalente : un blanc rond ou un rouge léger fonctionnent selon la sauce." },
-    { keywords:['épicé','curry','piment','asiatique','thaï','indien','wok'], ideal:['blanc','cuit'], reason:"Sur un plat épicé, un blanc légèrement rond ou un vin cuit adoucissent la sensation de piquant." },
-    { keywords:['fromage','raclette','fondue'], ideal:['rouge','blanc'], reason:"Fromages et raclette se marient bien avec un rouge léger ou un blanc de caractère selon les fromages." },
+    { keywords:['épicé','curry','piment','asiatique','thaï','indien','wok'], ideal:['blanc','cuit','biere'], reason:"Sur un plat épicé, un blanc légèrement rond, une bière blonde bien fraîche ou un vin cuit adoucissent la sensation de piquant." },
+    { keywords:['fromage','raclette','fondue'], ideal:['rouge','blanc','biere'], reason:"Fromages et raclette se marient bien avec un rouge léger, un blanc de caractère ou une bière (ambrée sur une raclette, blanche sur des fromages plus doux)." },
     { keywords:['chocolat','dessert','pâtisserie','gâteau','tarte'], ideal:['spiritueux','cuit','arrange'], reason:"Sur le sucré, un vieux rhum, un rhum/whisky arrangé ou un vin cuit apportent un accord de caractère plutôt qu'un vin classique." },
     { keywords:['bœuf','magret','agneau','steak','entrecôte','viande rouge','gibier'], ideal:['rouge'], reason:"Les viandes rouges réclament des tanins présents pour sublimer le plat." },
-    { keywords:['apéro','apéritif','tapas','entrée','planche'], ideal:['bulles','cuit','blanc','arrange'], reason:"Pour un apéritif, on privilégie la fraîcheur et la légèreté : bulles, vin cuit, blanc vif ou un arrangé bien frais." },
-    { keywords:['salade','été','estival','léger','pique-nique'], ideal:['blanc','rose'], reason:"Un repas léger et estival appelle un blanc ou un rosé rafraîchissant." },
+    { keywords:['apéro','apéritif','tapas','entrée','planche'], ideal:['bulles','cuit','blanc','arrange','biere'], reason:"Pour un apéritif, on privilégie la fraîcheur et la légèreté : bulles, vin cuit, blanc vif, une bière fraîche ou un arrangé bien frais." },
+    { keywords:['salade','été','estival','léger','pique-nique'], ideal:['blanc','rose','biere'], reason:"Un repas léger et estival appelle un blanc, un rosé ou une bière bien rafraîchissants." },
   ];
 
   function normalize(str){
@@ -436,6 +456,7 @@
 
   let bottles = [];
   let activeCategory = 'Tous';
+  let onlyAlcoholFree = false; // filtre transversal, indépendant de la catégorie : une bière (ou un vin) peut être sans alcool sans perdre son type propre
   let bottlesLoaded = false;
   let modalSession = 0; // voir openModal() : protège contre une analyse IA en fond qui se termine après un changement de formulaire
 
@@ -600,7 +621,7 @@
     let qty = typeof b.qty === 'number' && Number.isFinite(b.qty) ? b.qty : parseInt(b.qty, 10);
     qty = Number.isFinite(qty) ? Math.max(0, qty) : 0;
     let updatedAt = typeof b.updatedAt === 'number' && Number.isFinite(b.updatedAt) ? b.updatedAt : Date.now();
-    return { ...b, id, qty, updatedAt, deleted: !!b.deleted };
+    return { ...b, id, qty, updatedAt, deleted: !!b.deleted, exceptional: !!b.exceptional, sansAlcool: !!b.sansAlcool };
   }
 
   function sanitizeBottleList(list){
@@ -1128,7 +1149,7 @@
           <div class="flex items-center gap-2.5 min-w-0">
             <span>${cat ? cat.emoji : '🍾'}</span>
             <div class="min-w-0">
-              <p class="text-[14px] font-medium truncate" style="color:var(--cream)">${b.subtype ? `<span class="text-[9.5px] font-bold tracking-wide px-1 py-0.5 rounded mr-1" style="background:${(cat?cat.color:'#a89a8d')}2e;color:${cat?cat.color:'#a89a8d'}">${esc(b.subtype.toUpperCase())}</span>` : ''}${esc(b.name)}</p>
+              <p class="text-[14px] font-medium truncate" style="color:var(--cream)">${b.exceptional ? '<span title="Bouteille d\'exception" style="color:var(--gold)">⭐ </span>' : ''}${b.subtype ? `<span class="text-[9.5px] font-bold tracking-wide px-1 py-0.5 rounded mr-1" style="background:${(cat?cat.color:'#a89a8d')}2e;color:${cat?cat.color:'#a89a8d'}">${esc(b.subtype.toUpperCase())}</span>` : ''}${esc(b.name)}</p>
               <p class="text-[11.5px] truncate" style="color:var(--muted)">${esc(b.detail || (cat ? cat.label : ''))}</p>
             </div>
           </div>
@@ -1180,7 +1201,8 @@
           .join(', ');
         const bits = [`catégorie : ${cat ? cat.label : b.category}`, `quantité : ${b.qty}`];
         if (b.subtype) bits.unshift(`type : ${b.subtype}`);
-        if (b.degree) bits.push(`${b.degree}% vol`);
+        if (b.sansAlcool) bits.push('sans alcool');
+        else if (b.degree) bits.push(`${b.degree}% vol`);
         if (profile) bits.push(`profil : ${profile}`);
         return `- ${b.name}${b.detail ? ' (' + b.detail + ')' : ''} [${bits.join(', ')}]`;
       }).join('\n');
@@ -1243,7 +1265,7 @@ Exemple pour un magret de canard, si la cave contenait un Madiran : {"reason":"L
             <span class="text-[15px] shrink-0">${rankIcons[i] || '•'}</span>
             <span class="shrink-0">${cat ? cat.emoji : '🍾'}</span>
             <div class="min-w-0 flex-1">
-              <p class="text-[14px] font-medium truncate" style="color:var(--cream)">${b.subtype ? `<span class="text-[9.5px] font-bold tracking-wide px-1 py-0.5 rounded mr-1" style="background:${(cat?cat.color:'#a89a8d')}2e;color:${cat?cat.color:'#a89a8d'}">${esc(b.subtype.toUpperCase())}</span>` : ''}${esc(b.name)}</p>
+              <p class="text-[14px] font-medium truncate" style="color:var(--cream)">${b.exceptional ? '<span title="Bouteille d\'exception" style="color:var(--gold)">⭐ </span>' : ''}${b.subtype ? `<span class="text-[9.5px] font-bold tracking-wide px-1 py-0.5 rounded mr-1" style="background:${(cat?cat.color:'#a89a8d')}2e;color:${cat?cat.color:'#a89a8d'}">${esc(b.subtype.toUpperCase())}</span>` : ''}${esc(b.name)}</p>
               <p class="text-[11.5px] truncate" style="color:var(--muted)">${esc(b.detail || (cat ? cat.label : ''))}</p>
             </div>
             <button type="button" onclick="openModal(${b.id})" title="Voir la fiche complète" aria-label="Voir la fiche complète" class="p-1.5 rounded-lg shrink-0 transition" style="color:var(--muted);background:var(--bg-900);border:1px solid var(--line)">
@@ -1313,6 +1335,14 @@ async function markBottleUsedFromSuggestion(id, btnEl){
       return `<button onclick="setCategory('${key}')" class="px-3.5 py-2 rounded-full text-[13px] font-medium whitespace-nowrap transition" style="${style}">${label}</button>`;
     }).join('');
 
+    const extraFilters = document.getElementById('extraFilters');
+    if (extraFilters){
+      const afStyle = onlyAlcoholFree
+        ? 'background:var(--gold);color:var(--bg-950);border:1px solid var(--gold)'
+        : 'background:var(--bg-900);color:var(--muted);border:1px solid var(--line)';
+      extraFilters.innerHTML = `<button onclick="toggleAlcoholFreeFilter()" class="px-3.5 py-2 rounded-full text-[13px] font-medium whitespace-nowrap transition" style="${afStyle}">🚫 Sans alcool uniquement</button>`;
+    }
+
     if (!bottlesLoaded){
       list.innerHTML = '';
       empty.innerHTML = `<div class="loader w-6 h-6 mx-auto mb-3"></div><p style="color:var(--muted)">Chargement de votre cave…</p>`;
@@ -1334,9 +1364,10 @@ async function markBottleUsedFromSuggestion(id, btnEl){
 
     const filtered = visibleBottles().filter(b => {
       const mCat = activeCategory === 'Tous' || b.category === activeCategory;
+      const mAlcoolFree = !onlyAlcoholFree || b.sansAlcool;
       const hay = normalize(`${b.name} ${b.subtype || ''} ${b.detail || ''} ${b.notes || ''}`);
       const mSearch = !search || hay.includes(search);
-      return mCat && mSearch;
+      return mCat && mAlcoolFree && mSearch;
     });
 
     if (filtered.length === 0){
@@ -1362,6 +1393,7 @@ async function markBottleUsedFromSuggestion(id, btnEl){
           </div>
           <div class="flex-1 min-w-0">
             <div class="flex items-center gap-1.5 flex-wrap">
+              ${b.exceptional ? `<span title="Bouteille d'exception" style="color:var(--gold)">⭐</span>` : ''}
               ${b.subtype ? `<span class="text-[10px] font-bold tracking-wide px-1.5 py-0.5 rounded shrink-0" style="background:${cat.color}2e;color:${cat.color}">${esc(b.subtype.toUpperCase())}</span>` : ''}
               <h3 class="font-serif-display text-[16px] font-semibold truncate" style="color:var(--cream)">${esc(b.name)}</h3>
             </div>
@@ -1369,7 +1401,7 @@ async function markBottleUsedFromSuggestion(id, btnEl){
             <div class="flex items-center gap-2 mt-1 flex-wrap">
               <span class="text-[11px] px-2 py-0.5 rounded-full" style="${statusStyle}">${esc(b.status)}</span>
               ${b.price ? `<span class="text-[11px]" style="color:var(--gold)">${esc(b.price)}</span>` : ''}
-              ${b.degree ? `<span class="text-[11px]" style="color:var(--muted)">${esc(b.degree)}% vol</span>` : ''}
+              ${b.sansAlcool ? `<span class="text-[11px]" style="color:var(--muted)">🚫 Sans alcool</span>` : (b.degree ? `<span class="text-[11px]" style="color:var(--muted)">${esc(b.degree)}% vol</span>` : '')}
             </div>
             ${scoreBarsHtml(b)}
             ${b.notes ? `<p class="text-[12px] italic mt-1.5 leading-relaxed line-clamp-2" style="color:#cabcae">${esc(b.notes)}</p>` : ''}
@@ -1396,9 +1428,12 @@ async function markBottleUsedFromSuggestion(id, btnEl){
 
   function setCategory(cat){ activeCategory = cat; renderApp(); }
 
+  function toggleAlcoholFreeFilter(){ onlyAlcoholFree = !onlyAlcoholFree; renderApp(); }
+
   function clearFilters(){
     document.getElementById('searchInput').value = '';
     activeCategory = 'Tous';
+    onlyAlcoholFree = false;
     renderApp();
   }
 
@@ -1447,6 +1482,8 @@ async function markBottleUsedFromSuggestion(id, btnEl){
       document.getElementById('notesInput').value = b.notes || '';
       document.getElementById('imageUrlInput').value = b.image || '';
       document.getElementById('degreInput').value = b.degree || '';
+      document.getElementById('sansAlcoolInput').checked = !!b.sansAlcool;
+      document.getElementById('exceptionalInput').checked = !!b.exceptional;
       renderScoreInputs(b.scores || {});
     } else {
       document.getElementById('modalTitle').textContent = 'Ajouter une bouteille';
@@ -1540,6 +1577,8 @@ async function markBottleUsedFromSuggestion(id, btnEl){
       price: document.getElementById('priceInput').value.trim(),
       notes: document.getElementById('notesInput').value.trim(),
       degree: document.getElementById('degreInput').value.trim(),
+      sansAlcool: document.getElementById('sansAlcoolInput').checked,
+      exceptional: document.getElementById('exceptionalInput').checked,
       scores: collectScoreInputs(),
       image: document.getElementById('imageUrlInput').value,
       updatedAt: Date.now()
@@ -2149,25 +2188,26 @@ RÈGLES STRICTES :
 2. PRINCIPE LE PLUS IMPORTANT — dans le doute, on omet. Une information manquante ne gêne pas l'utilisateur ; une information fausse le trompe et pollue durablement sa cave. N'écris donc JAMAIS une valeur "plausible" : si tu ne la lis pas clairement sur l'étiquette ou ne la déduis pas avec une vraie certitude d'un élément identifié (domaine, appellation, marque, mention explicite), laisse "" pour un champ texte et omets la clé pour un critère.
 3. Ne devine RIEN à partir de la seule forme, couleur ou allure de la bouteille : une bouteille sombre n'est pas forcément un rouge, un flacon trapu pas forcément un rhum. Si l'étiquette est floue, partiellement masquée ou illisible, remplis uniquement le peu dont tu es certain et laisse tout le reste vide.
 4. Ne recopie jamais un texte marketing de l'étiquette ("grande cuvée d'exception") comme s'il s'agissait d'une information factuelle.
-5. Pour "categorie", en cas d'hésitation entre deux catégories proches (ex. vin muté "cuit" vs "spiritueux", ou spiritueux classique vs "arrange"), choisis celle qui correspond le mieux à l'usage principal du produit tel qu'il apparaît sur l'étiquette. "sans_alcool" uniquement si l'étiquette indique explicitement 0% ou "sans alcool".
-6. Pour "degre" : utilise en priorité la valeur lisible sur l'étiquette. Si elle est illisible, tu peux estimer à partir de repères connus (vin non muté : 8-16% ; vin cuit/muté : 15-22% ; spiritueux : 35-50%), mais laisse "" si même une estimation par style serait trop incertaine (ex. spiritueux artisanal atypique).
+5. Pour "categorie", en cas d'hésitation entre deux catégories proches (ex. vin muté "cuit" vs "spiritueux", ou spiritueux classique vs "arrange"), choisis celle qui correspond le mieux à l'usage principal du produit tel qu'il apparaît sur l'étiquette. Utilise "sans_alcool" UNIQUEMENT pour un produit sans alcool qui n'a pas de catégorie plus précise (ex. un soda apéritif, un cocktail sans alcool) — une bière ou un vin explicitement à 0%/"sans alcool" reste catégorisé "biere"/"rouge"/etc., avec "sansAlcool": true (voir structure ci-dessous) : ça lui garde son type et son profil de dégustation propres plutôt que de le noyer dans une catégorie générique.
+6. Pour "degre" : utilise en priorité la valeur lisible sur l'étiquette. Si elle est illisible, tu peux estimer à partir de repères connus (vin non muté : 8-16% ; vin cuit/muté : 15-22% ; bière : 4-8% ; spiritueux : 35-50%), mais laisse "" si même une estimation par style serait trop incertaine (ex. spiritueux artisanal atypique). Si "sansAlcool" est vrai, mets "0".
 7. Pour "prix" : ne propose une fourchette que si tu reconnais réellement la bouteille ou son appellation. Sinon "". Un prix inventé est pire que pas de prix.
 
 Structure de réponse :
 {
   "nom": "Nom du domaine et de la cuvée",
-  "categorie": "L'une de ces valeurs exactes : rouge, blanc, rose, bulles, cuit, spiritueux, arrange, sans_alcool",
-  "type": "Type précis et court, affiché en badge (ex: Gin, Rhum, Whisky, Vodka, Cognac, Limoncello, Bordeaux, Champagne...)",
+  "categorie": "L'une de ces valeurs exactes : rouge, blanc, rose, bulles, biere, cuit, spiritueux, arrange, sans_alcool",
+  "type": "Type précis et court, affiché en badge (ex: Gin, Rhum, Whisky, Vodka, Cognac, Limoncello, Bordeaux, Champagne, IPA, Blonde, Brune...)",
   "detail": "Appellation, cépage, millésime",
   "prix": "Estimation du prix moyen en euros (ex: 15€ - 20€), ou \"\" si aucune estimation fiable n'est possible",
   "degre": "Degré d'alcool en pourcentage, nombre seul sans le symbole % (ex: 13.5), ou \"\" (voir règle 4)",
+  "sansAlcool": "true UNIQUEMENT si l'étiquette indique explicitement 0% ou \"sans alcool\", sinon false",
   "criteres": { /* voir consigne ci-dessous — ce champ seul varie en nombre de clés selon la boisson */ },
   "notes": "Courte note de dégustation. Propose un accord avec une cuisine semi-gastronomique simple. Si c'est un vin rouge, oriente vers des plats épicés. Si c'est un rhum/vin cuit, oriente vers un dessert fort en chocolat. Adapte tes suggestions pour qu'elles puissent se décliner facilement pour un enfant. IMPORTANT : Ne propose JAMAIS d'accords contenant des champignons."
 }
 
 Consigne pour "criteres" (la seule partie de la structure au nombre de clés VARIABLE) :
-Liste complète des clés possibles, chacune notée en entier de 1 (très faible) à 5 (très élevé) : fruit, acidite, tanin, puissance, mineralite, fraicheur, effervescence, finesse, douceur, longueur, complexite, boise, originalite, tourbe.
-- N'inclus QUE les clés réellement pertinentes pour la catégorie et le type précis identifiés (typiquement 3 à 5 clés) : par exemple pas de "tanin" ni "mineralite" pour un rhum, pas d'"effervescence" pour un vin tranquille.
+Liste complète des clés possibles, chacune notée en entier de 1 (très faible) à 5 (très élevé) : fruit, acidite, tanin, puissance, mineralite, fraicheur, effervescence, amertume, finesse, douceur, longueur, complexite, boise, originalite, tourbe.
+- N'inclus QUE les clés réellement pertinentes pour la catégorie et le type précis identifiés (typiquement 3 à 5 clés) : par exemple pas de "tanin" ni "mineralite" pour un rhum, pas d'"effervescence" pour un vin tranquille, pas d'"amertume" hors bière.
 - Chaque note doit s'appuyer sur un élément IDENTIFIÉ (appellation, cépage, style de production, marque reconnue). Si tu n'as pas identifié le style avec assez de certitude pour te prononcer sur un critère, omets cette clé. Mieux vaut renvoyer 2 critères sûrs que 5 approximatifs : l'utilisateur comparera ses bouteilles sur ces notes, une note inventée fausse toutes ses comparaisons.
 - Si l'étiquette est trop peu lisible pour identifier le style, renvoie "criteres": {} (objet vide). C'est une réponse parfaitement acceptable.
 - "tourbe" est un cas particulier : ne l'inclus QUE si le type précis est "Whisky" ET que l'étiquette indique ou suggère un style tourbé (ex. Islay, Laphroaig, Ardbeg, Talisker, mention "peated"/"tourbé"). Pour un whisky non tourbé, ou un whisky dont tu ignores s'il est tourbé, omets complètement cette clé plutôt que de mettre 1.
@@ -2175,7 +2215,7 @@ Liste complète des clés possibles, chacune notée en entier de 1 (très faible
 Utilise "arrange" pour tout spiritueux infusé, aromatisé ou fruit macéré dans l'alcool : rhum ou whisky arrangé, limoncello, cognac au citron, cerises à l'eau de vie, liqueur artisanale, etc. — jamais pour un spiritueux classique.
 
 Exemple complet pour un whisky tourbé d'Islay à 46% (à titre d'illustration du format attendu, n'utilise ces valeurs que si elles correspondent réellement à la bouteille photographiée) :
-{"nom":"Ardbeg Ten","categorie":"spiritueux","type":"Whisky","detail":"Single Malt Scotch Whisky, Islay, 10 ans d'âge","prix":"45€ - 55€","degre":"46","criteres":{"puissance":4,"douceur":2,"boise":3,"longueur":5,"tourbe":5},"notes":"Fumé et iodé, à servir avec un dessert au chocolat noir intense — parfait aussi pour un enfant en version chocolat chaud très corsé (sans alcool bien sûr)."}
+{"nom":"Ardbeg Ten","categorie":"spiritueux","type":"Whisky","detail":"Single Malt Scotch Whisky, Islay, 10 ans d'âge","prix":"45€ - 55€","degre":"46","sansAlcool":false,"criteres":{"puissance":4,"douceur":2,"boise":3,"longueur":5,"tourbe":5},"notes":"Fumé et iodé, à servir avec un dessert au chocolat noir intense — parfait aussi pour un enfant en version chocolat chaud très corsé (sans alcool bien sûr)."}
 
 Rappel final : ta réponse doit être EXCLUSIVEMENT l'objet JSON ci-dessus rempli pour la bouteille photographiée, rien d'autre.`;
 
@@ -2221,6 +2261,7 @@ Rappel final : ta réponse doit être EXCLUSIVEMENT l'objet JSON ci-dessus rempl
       document.getElementById('detailInput').value = parsed.detail || '';
       document.getElementById('priceInput').value = parsed.prix || '';
       document.getElementById('degreInput').value = parsed.degre || '';
+      document.getElementById('sansAlcoolInput').checked = !!parsed.sansAlcool;
       document.getElementById('notesInput').value = parsed.notes || '';
       renderScoreInputs(parsed.criteres || {});
 
