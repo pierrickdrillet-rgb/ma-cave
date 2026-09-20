@@ -81,6 +81,7 @@
       </div>
       <div class="flex gap-2 overflow-x-auto pb-1" id="categoryFilters"></div>
       <div class="flex gap-2 flex-wrap" id="extraFilters"></div>
+      <div id="filterPanel" class="hidden p-3 rounded-xl flex flex-col gap-3" style="background:var(--bg-900);border:1px solid var(--line)"></div>
     </div>
 
     <div id="inventoryList" class="flex flex-col gap-2.5"></div>
@@ -155,11 +156,14 @@
             </div>
             <div>
               <label class="block text-[12.5px] font-medium mb-1" style="color:var(--muted)">Contenance <span class="font-normal">(facultatif)</span></label>
-              <input type="text" id="volumeInput" list="volumeOptions" placeholder="Ex. 75cl" class="w-28 rounded-xl px-3 py-2 text-[14px]" style="background:var(--bg-900);border:1px solid var(--line);color:var(--cream)">
+              <div class="relative w-24">
+                <input type="number" id="volumeInput" list="volumeOptions" min="0" step="0.5" inputmode="decimal" placeholder="75" class="w-full rounded-xl pl-3 pr-7 py-2 text-[14px]" style="background:var(--bg-900);border:1px solid var(--line);color:var(--cream)">
+                <span class="absolute right-2.5 top-1/2 -translate-y-1/2 text-[12px] pointer-events-none" style="color:var(--muted)">cl</span>
+              </div>
               <datalist id="volumeOptions">
-                <option value="25cl"><option value="33cl"><option value="37.5cl"><option value="44cl">
-                <option value="50cl"><option value="70cl"><option value="75cl"><option value="100cl">
-                <option value="150cl">
+                <option value="25"><option value="33"><option value="37.5"><option value="44">
+                <option value="50"><option value="70"><option value="75"><option value="100">
+                <option value="150">
               </datalist>
             </div>
             <label class="flex items-center gap-2 pb-2 cursor-pointer">
@@ -222,7 +226,8 @@
         <div class="px-4 pb-4 text-[12px] leading-relaxed space-y-2.5" style="color:var(--muted)">
           <p><strong style="color:var(--cream)">Ajouter une bouteille :</strong> photographiez l'étiquette — le nom, le type, la contenance et le profil de dégustation se remplissent en général tout seuls — ou saisissez tout à la main. Relisez toujours avant d'enregistrer : l'IA se trompe parfois.</p>
           <p><strong style="color:var(--cream)">Retirer une bouteille sortie :</strong> l'icône appareil photo dans l'en-tête ouvre un mode dédié — photographiez la bouteille servie, l'IA la retrouve dans votre cave et propose de la retirer d'un geste, sans avoir à la chercher dans la liste.</p>
-          <p><strong style="color:var(--cream)">Bière & sans alcool :</strong> la catégorie Bière a son propre profil de dégustation (dont l'amertume). Une bière — ou un vin — sans alcool garde sa catégorie d'origine grâce à la case dédiée, et se filtre séparément avec "Sans alcool uniquement". La contenance (33cl, 75cl...) se filtre aussi, une fois plusieurs valeurs présentes dans la cave.</p>
+          <p><strong style="color:var(--cream)">Bière & sans alcool :</strong> la catégorie Bière a son propre profil de dégustation (dont l'amertume). Une bière — ou un vin — sans alcool garde sa catégorie d'origine grâce à la case dédiée, et se filtre séparément avec "Sans alcool uniquement".</p>
+          <p><strong style="color:var(--cream)">Filtrer par contenance ou type précis :</strong> le bouton "🔍 Filtres" ouvre un panneau à cases multiples — cochez par exemple 33cl et 25cl ensemble, ou Brune et Stout ensemble (uniquement les valeurs présentes dans la catégorie affichée). Une case "Non renseigné(e)" apparaît si certaines bouteilles n'ont pas encore ce champ rempli, pour choisir de les inclure ou non. Changer de catégorie réinitialise ces cases, puisque les valeurs disponibles changent.</p>
           <p><strong style="color:var(--cream)">Comment marche l'IA :</strong> Gemini est utilisé en priorité. S'il est indisponible (clé absente/invalide, quota épuisé), l'appli bascule automatiquement sur la clé de secours OpenRouter si elle est renseignée. Un message <span style="color:var(--gold)">↩️ Secours utilisé</span> apparaît alors sous le résultat.</p>
           <p><strong style="color:var(--cream)">Compléter les fiches existantes :</strong> le bouton "🪄 Compléter les fiches incomplètes" (plus bas) relance l'IA sur les bouteilles ayant déjà une photo mais des champs vides — jamais sur celles sans photo, pour ne rien inventer à partir du seul nom.</p>
           <p><strong style="color:var(--cream)">Si l'IA échoue :</strong> le message donne la cause précise. Les plus fréquentes — clé invalide (à revérifier ci-dessous), quota gratuit épuisé (OpenRouter sans crédit : 50 requêtes/jour tous modèles confondus, y compris les échecs — réessayez plus tard, ou achetez 10$ de crédit une fois pour passer à 1000/jour), ou restriction "Zero Data Retention" activée sur le workspace OpenRouter (à assouplir sur openrouter.ai, Guardrails → Model & Provider Access, pour les modèles gratuits). Dans tous les cas, la fiche reste utilisable en saisie manuelle.</p>
@@ -519,7 +524,13 @@
   let bottles = [];
   let activeCategory = 'Tous';
   let onlyAlcoholFree = false; // filtre transversal, indépendant de la catégorie : une bière (ou un vin) peut être sans alcool sans perdre son type propre
-  let volumeFilter = ''; // '' = toutes contenances ; sinon une valeur exacte de b.volume
+  // Filtres à choix multiples (panneau "🔍 Filtres") : Set vide = pas de filtre
+  // sur cette facette. '' dans le Set représente explicitement "non
+  // renseigné", pour pouvoir l'inclure ou l'exclure volontairement plutôt que
+  // de l'inclure ou l'exclure implicitement dès qu'un autre filtre est actif.
+  let volumeFilters = new Set();
+  let subtypeFilters = new Set();
+  let filterPanelOpen = false;
   let bottlesLoaded = false;
   let modalSession = 0; // voir openModal() : protège contre une analyse IA en fond qui se termine après un changement de formulaire
   let quickRemoveSession = 0; // même principe pour la fenêtre d'identification par photo
@@ -685,7 +696,12 @@
     let qty = typeof b.qty === 'number' && Number.isFinite(b.qty) ? b.qty : parseInt(b.qty, 10);
     qty = Number.isFinite(qty) ? Math.max(0, qty) : 0;
     let updatedAt = typeof b.updatedAt === 'number' && Number.isFinite(b.updatedAt) ? b.updatedAt : Date.now();
-    return { ...b, id, qty, updatedAt, deleted: !!b.deleted, exceptional: !!b.exceptional, sansAlcool: !!b.sansAlcool };
+    // La contenance est stockée en nombre pur (voir le champ "cl" affiché à
+    // part dans le formulaire) — normalisation de compatibilité pour
+    // d'éventuelles bouteilles enregistrées au format texte "33cl" avant ce
+    // changement, afin que le filtre par contenance les reconnaisse aussi.
+    const volume = typeof b.volume === 'string' ? b.volume.replace(/[^\d.]/g, '') : '';
+    return { ...b, id, qty, updatedAt, volume, deleted: !!b.deleted, exceptional: !!b.exceptional, sansAlcool: !!b.sansAlcool };
   }
 
   function sanitizeBottleList(list){
@@ -719,6 +735,23 @@
   function esc(str){
     if (str === null || str === undefined) return '';
     return String(str).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  }
+
+  // La contenance est stockée en cl pour rester simple et cohérente à la
+  // saisie (un seul champ numérique), mais l'affichage passe en litres à
+  // partir de 100cl : "150cl" est moins lisible que "1,5L" pour un magnum.
+  // La virgule (et non le point) suit la convention française déjà utilisée
+  // partout ailleurs dans l'appli.
+  function formatVolume(v){
+    if (!v) return '';
+    const num = parseFloat(v);
+    if (!Number.isFinite(num)) return v;
+    if (num >= 100){
+      const liters = num / 100;
+      const litersStr = (liters % 1 === 0 ? liters.toFixed(0) : String(liters)).replace('.', ',');
+      return `${litersStr}L`;
+    }
+    return `${String(v).replace('.', ',')}cl`;
   }
 
   // ==========================================================================
@@ -1394,17 +1427,17 @@ async function markBottleUsedFromSuggestion(id, btnEl){
       const afStyle = onlyAlcoholFree
         ? 'background:var(--gold);color:var(--bg-950);border:1px solid var(--gold)'
         : 'background:var(--bg-900);color:var(--muted);border:1px solid var(--line)';
-      const volumes = [...new Set(visibleBottles().map(b => b.volume).filter(Boolean))]
-        .sort((a, b) => (parseFloat(a) || 999) - (parseFloat(b) || 999) || a.localeCompare(b));
-      const volumeOptionsHtml = volumes.map(v => `<option value="${esc(v)}" ${volumeFilter === v ? 'selected' : ''}>${esc(v)}</option>`).join('');
+      const panelActiveCount = volumeFilters.size + subtypeFilters.size;
+      const filterBtnStyle = panelActiveCount
+        ? 'background:var(--gold);color:var(--bg-950);border:1px solid var(--gold)'
+        : 'background:var(--bg-900);color:var(--muted);border:1px solid var(--line)';
       extraFilters.innerHTML = `
         <button onclick="toggleAlcoholFreeFilter()" class="px-3.5 py-2 rounded-full text-[13px] font-medium whitespace-nowrap transition" style="${afStyle}">🚫 Sans alcool uniquement</button>
-        ${volumes.length ? `<select onchange="setVolumeFilter(this.value)" class="px-3 py-2 rounded-full text-[13px] font-medium" style="background:var(--bg-900);color:${volumeFilter ? 'var(--gold)' : 'var(--muted)'};border:1px solid var(--line)">
-          <option value="">Toutes les contenances</option>
-          ${volumeOptionsHtml}
-        </select>` : ''}
+        <button onclick="toggleFilterPanel()" class="px-3.5 py-2 rounded-full text-[13px] font-medium whitespace-nowrap transition" style="${filterBtnStyle}">🔍 Filtres${panelActiveCount ? ' (' + panelActiveCount + ')' : ''}</button>
       `;
     }
+    renderFilterPanel();
+
 
     if (!bottlesLoaded){
       list.innerHTML = '';
@@ -1428,10 +1461,11 @@ async function markBottleUsedFromSuggestion(id, btnEl){
     const filtered = visibleBottles().filter(b => {
       const mCat = activeCategory === 'Tous' || b.category === activeCategory;
       const mAlcoolFree = !onlyAlcoholFree || b.sansAlcool;
-      const mVolume = !volumeFilter || b.volume === volumeFilter;
+      const mVolume = volumeFilters.size === 0 || volumeFilters.has(b.volume || '');
+      const mSubtype = subtypeFilters.size === 0 || subtypeFilters.has(b.subtype || '');
       const hay = normalize(`${b.name} ${b.subtype || ''} ${b.detail || ''} ${b.notes || ''}`);
       const mSearch = !search || hay.includes(search);
-      return mCat && mAlcoolFree && mVolume && mSearch;
+      return mCat && mAlcoolFree && mVolume && mSubtype && mSearch;
     });
 
     if (filtered.length === 0){
@@ -1466,7 +1500,7 @@ async function markBottleUsedFromSuggestion(id, btnEl){
               <span class="text-[11px] px-2 py-0.5 rounded-full" style="${statusStyle}">${esc(b.status)}</span>
               ${b.price ? `<span class="text-[11px]" style="color:var(--gold)">${esc(b.price)}</span>` : ''}
               ${b.sansAlcool ? `<span class="text-[11px]" style="color:var(--muted)">🚫 Sans alcool</span>` : (b.degree ? `<span class="text-[11px]" style="color:var(--muted)">${esc(b.degree)}% vol</span>` : '')}
-              ${b.volume ? `<span class="text-[11px]" style="color:var(--muted)">${esc(b.volume)}</span>` : ''}
+              ${b.volume ? `<span class="text-[11px]" style="color:var(--muted)">${esc(formatVolume(b.volume))}</span>` : ''}
             </div>
             ${scoreBarsHtml(b)}
             ${b.notes ? `<p class="text-[12px] italic mt-1.5 leading-relaxed line-clamp-2" style="color:#cabcae">${esc(b.notes)}</p>` : ''}
@@ -1491,17 +1525,95 @@ async function markBottleUsedFromSuggestion(id, btnEl){
     }).join('');
   }
 
-  function setCategory(cat){ activeCategory = cat; renderApp(); }
+  function setCategory(cat){
+    activeCategory = cat;
+    // Les options du panneau (contenance/type) sont propres à la catégorie
+    // affichée : les garder actives en changeant de catégorie mènerait à une
+    // liste vide sans que la case cochée qui en est la cause reste visible
+    // (elle disparaît du panneau, recalculé pour la nouvelle catégorie).
+    volumeFilters.clear();
+    subtypeFilters.clear();
+    renderApp();
+  }
 
   function toggleAlcoholFreeFilter(){ onlyAlcoholFree = !onlyAlcoholFree; renderApp(); }
 
-  function setVolumeFilter(v){ volumeFilter = v; renderApp(); }
+  function toggleFilterPanel(){ filterPanelOpen = !filterPanelOpen; renderApp(); }
+
+  function toggleVolumeFilter(v){
+    if (volumeFilters.has(v)) volumeFilters.delete(v); else volumeFilters.add(v);
+    renderApp();
+  }
+
+  function toggleSubtypeFilter(s){
+    if (subtypeFilters.has(s)) subtypeFilters.delete(s); else subtypeFilters.add(s);
+    renderApp();
+  }
+
+  function resetPanelFilters(){
+    volumeFilters.clear();
+    subtypeFilters.clear();
+    renderApp();
+  }
+
+  // Chip à bascule pour le panneau de filtres — la valeur réelle passe par un
+  // attribut data-* plutôt que d'être insérée dans le code onclick : un type
+  // précis ou une contenance peuvent contenir une apostrophe (ex. un nom avec
+  // accent typographique), ce qui casserait un onclick="fn('${valeur}')"
+  // construit par simple interpolation de chaîne.
+  function filterChipHtml(label, value, active, handler){
+    const style = active
+      ? 'background:var(--gold);color:var(--bg-950);border:1px solid var(--gold)'
+      : 'background:var(--bg-950);color:var(--muted);border:1px solid var(--line)';
+    return `<button type="button" data-value="${esc(value)}" onclick="${handler}(this.dataset.value)" class="px-3 py-1.5 rounded-full text-[12.5px] font-medium whitespace-nowrap transition" style="${style}">${esc(label)}</button>`;
+  }
+
+  function renderFilterPanel(){
+    const panel = document.getElementById('filterPanel');
+    if (!panel) return;
+    panel.classList.toggle('hidden', !filterPanelOpen);
+    if (!filterPanelOpen) return; // pas besoin de recalculer le contenu d'un panneau fermé
+
+    const inCategory = visibleBottles().filter(b => activeCategory === 'Tous' || b.category === activeCategory);
+
+    const volumes = [...new Set(inCategory.map(b => b.volume).filter(Boolean))]
+      .sort((a, b) => (parseFloat(a) || 999) - (parseFloat(b) || 999));
+    const hasEmptyVolume = inCategory.some(b => !b.volume);
+
+    const subtypes = [...new Set(inCategory.map(b => b.subtype).filter(Boolean))].sort((a, b) => a.localeCompare(b));
+    const hasEmptySubtype = inCategory.some(b => !b.subtype);
+
+    let html = '';
+    if (volumes.length || hasEmptyVolume){
+      html += `<div>
+        <p class="text-[10.5px] font-semibold tracking-wide mb-1.5" style="color:var(--muted)">CONTENANCE</p>
+        <div class="flex gap-1.5 flex-wrap">
+          ${volumes.map(v => filterChipHtml(formatVolume(v), v, volumeFilters.has(v), 'toggleVolumeFilter')).join('')}
+          ${hasEmptyVolume ? filterChipHtml('Non renseignée', '', volumeFilters.has(''), 'toggleVolumeFilter') : ''}
+        </div>
+      </div>`;
+    }
+    if (subtypes.length || hasEmptySubtype){
+      html += `<div>
+        <p class="text-[10.5px] font-semibold tracking-wide mb-1.5" style="color:var(--muted)">TYPE PRÉCIS</p>
+        <div class="flex gap-1.5 flex-wrap">
+          ${subtypes.map(s => filterChipHtml(s, s, subtypeFilters.has(s), 'toggleSubtypeFilter')).join('')}
+          ${hasEmptySubtype ? filterChipHtml('Non renseigné', '', subtypeFilters.has(''), 'toggleSubtypeFilter') : ''}
+        </div>
+      </div>`;
+    }
+    if (volumeFilters.size || subtypeFilters.size){
+      html += `<button type="button" onclick="resetPanelFilters()" class="text-[12px] self-start" style="color:var(--gold)">Réinitialiser ces filtres</button>`;
+    }
+    panel.innerHTML = html || `<p class="text-[12px]" style="color:var(--muted)">Aucune contenance ni type précis à filtrer pour l'instant sur cette catégorie.</p>`;
+  }
 
   function clearFilters(){
     document.getElementById('searchInput').value = '';
     activeCategory = 'Tous';
     onlyAlcoholFree = false;
-    volumeFilter = '';
+    volumeFilters.clear();
+    subtypeFilters.clear();
     renderApp();
   }
 
@@ -2401,7 +2513,7 @@ RÈGLES STRICTES :
 6. Un millésime (année) ne va dans "detail" QUE s'il est présenté sans ambiguïté comme l'année de récolte/production de CETTE bouteille. Une année croisée ailleurs sur l'étiquette (ex. "domaine fondé en 1932", une année dans le nom d'une médaille ou d'un concours) n'est PAS un millésime — ne l'utilise pas comme tel.
 7. Pour "categorie", en cas d'hésitation entre deux catégories proches (ex. vin muté "cuit" vs "spiritueux", ou spiritueux classique vs "arrange"), choisis celle qui correspond le mieux à l'usage principal du produit tel qu'il apparaît sur l'étiquette. Utilise "sans_alcool" UNIQUEMENT pour un produit sans alcool qui n'a pas de catégorie plus précise (ex. un soda apéritif, un cocktail sans alcool) — une bière ou un vin explicitement à 0%/"sans alcool" reste catégorisé "biere"/"rouge"/etc., avec "sansAlcool": true (voir structure ci-dessous) : ça lui garde son type et son profil de dégustation propres plutôt que de le noyer dans une catégorie générique.
 8. Pour "degre" : utilise en priorité la valeur lisible sur l'étiquette. Si elle est illisible, tu peux estimer à partir de repères connus (vin non muté : 8-16% ; vin cuit/muté : 15-22% ; bière : 4-8% ; spiritueux : 35-50%), mais laisse "" si même une estimation par style serait trop incertaine (ex. spiritueux artisanal atypique, bière très forte type barleywine). Si "sansAlcool" est vrai, mets "0".
-9. Pour "contenance" : utilise en priorité la valeur imprimée sur l'étiquette (souvent en petits caractères, ex. "75 cl", "750 ml", "33 cl"). Si illisible : pour un VIN uniquement, "75cl" est un standard de marché si fiable à supposer (>90% des bouteilles de vin) ; pour la BIÈRE et les SPIRITUEUX, la taille varie beaucoup trop (canette 33cl, bouteille 25cl/50cl/75cl…) pour être devinée — laisse "" si illisible dans ces cas.
+9. Pour "contenance" : utilise en priorité la valeur imprimée sur l'étiquette (souvent en petits caractères, ex. "75 cl", "750 ml", "33 cl" — convertis les mL en cl : 750ml → 75, 330ml → 33). Ne renvoie QUE le nombre, sans "cl" ni unité. Si illisible : pour un VIN uniquement, 75 est un standard de marché si fiable à supposer (>90% des bouteilles de vin) ; pour la BIÈRE et les SPIRITUEUX, la taille varie beaucoup trop (canette 33, bouteille 25/50/75…) pour être devinée — laisse "" si illisible dans ces cas.
 10. Pour "prix" : ne propose une fourchette que si tu reconnais réellement la bouteille ou son appellation. Sinon "". Un prix inventé est pire que pas de prix.
 11. Le champ "notes" n'est PAS une dégustation que tu prétends avoir faite (tu n'as jamais goûté cette bouteille) : c'est une suggestion d'accord mets-vin fondée sur le STYLE/LA CATÉGORIE identifiée (générique et raisonnable, ex. "un rouge tannique va bien avec une viande rouge" est un conseil sûr même sans avoir goûté CETTE bouteille précise). N'y décris jamais des arômes précis ("notes de cassis et vanille") sauf s'ils sont littéralement imprimés sur l'étiquette elle-même.
 12. Avant de répondre, relis mentalement chaque champ non vide et demande-toi : "quel élément PRÉCIS et VISIBLE de la photo justifie cette valeur ?". Si tu ne peux pas répondre concrètement à cette question pour un champ, remets-le à "" (ou omets la clé pour un critère de "criteres").
@@ -2415,7 +2527,7 @@ Structure de réponse :
   "detail": "Appellation, cépage, millésime (voir règle 6)",
   "prix": "Estimation du prix moyen en euros (ex: 15€ - 20€), ou \"\" si aucune estimation fiable n'est possible",
   "degre": "Degré d'alcool en pourcentage, nombre seul sans le symbole % (ex: 13.5), ou \"\" (voir règle 8)",
-  "contenance": "Volume normalisé, nombre + cl (ex: 75cl, 33cl, 50cl), ou \"\" (voir règle 9)",
+  "contenance": "Nombre seul en cl, SANS le symbole (ex: 75, 33, 50), ou \"\" (voir règle 9)",
   "sansAlcool": "true UNIQUEMENT si l'étiquette indique explicitement 0% ou \"sans alcool\", sinon false",
   "criteres": { /* voir consigne ci-dessous — ce champ seul varie en nombre de clés selon la boisson */ },
   "notes": "Voir règle 11 : suggestion d'accord générique par style, jamais une dégustation inventée. Si c'est un vin rouge, oriente vers des plats épicés. Si c'est un rhum/vin cuit, oriente vers un dessert fort en chocolat. Adapte tes suggestions pour qu'elles puissent se décliner facilement pour un enfant. IMPORTANT : Ne propose JAMAIS d'accords contenant des champignons."
@@ -2431,7 +2543,7 @@ Liste complète des clés possibles, chacune notée en entier de 1 (très faible
 Utilise "arrange" pour tout spiritueux infusé, aromatisé ou fruit macéré dans l'alcool : rhum ou whisky arrangé, limoncello, cognac au citron, cerises à l'eau de vie, liqueur artisanale, etc. — jamais pour un spiritueux classique.
 
 Exemple complet pour un whisky tourbé d'Islay à 70cl et 46% (à titre d'illustration du format attendu, n'utilise ces valeurs que si elles correspondent réellement à la bouteille photographiée) :
-{"nom":"Ardbeg Ten","categorie":"spiritueux","type":"Whisky","detail":"Single Malt Scotch Whisky, Islay, 10 ans d'âge","prix":"45€ - 55€","degre":"46","contenance":"70cl","sansAlcool":false,"criteres":{"puissance":4,"douceur":2,"boise":3,"longueur":5,"tourbe":5},"notes":"Fumé et iodé, à servir avec un dessert au chocolat noir intense — parfait aussi pour un enfant en version chocolat chaud très corsé (sans alcool bien sûr)."}
+{"nom":"Ardbeg Ten","categorie":"spiritueux","type":"Whisky","detail":"Single Malt Scotch Whisky, Islay, 10 ans d'âge","prix":"45€ - 55€","degre":"46","contenance":"70","sansAlcool":false,"criteres":{"puissance":4,"douceur":2,"boise":3,"longueur":5,"tourbe":5},"notes":"Fumé et iodé, à servir avec un dessert au chocolat noir intense — parfait aussi pour un enfant en version chocolat chaud très corsé (sans alcool bien sûr)."}
 
 Contre-exemple de ce qu'il NE FAUT PAS faire : une photo floue où l'on distingue vaguement une bouteille sombre ne doit JAMAIS donner {"nom":"Vin rouge","categorie":"rouge","degre":"13"} — ce serait inventer une identité à partir d'une silhouette. La bonne réponse dans ce cas est {"nom":"","categorie":"","type":"","detail":"","prix":"","degre":"","contenance":"","sansAlcool":false,"criteres":{},"notes":""}.
 
