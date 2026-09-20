@@ -1533,6 +1533,13 @@ async function markBottleUsedFromSuggestion(id, btnEl){
     modalSession++;
     document.getElementById('bottleModal').classList.remove('hidden');
     document.getElementById('bottleModalContent').scrollTop = 0; // BUG CORRIGÉ : la fenêtre s'ouvrait à la position de défilement laissée par la dernière fois (elle n'est pas recréée, juste masquée), ce qui pouvait cacher "Nom"/"Détail" tout en haut
+    // Même cause, même remède pour les deux zones de texte redimensionnables
+    // (resize:vertical) : un glisser manuel sur UNE bouteille laisse une
+    // hauteur figée en style inline sur l'élément, qui persiste pour toutes
+    // les bouteilles suivantes puisque le champ n'est jamais recréé. On la
+    // réinitialise à chaque ouverture pour repartir de la taille par défaut (rows=3).
+    document.getElementById('detailInput').style.height = '';
+    document.getElementById('notesInput').style.height = '';
     document.getElementById('photoCaptureInput').value = '';
     document.getElementById('aiFeedback').textContent = "Prenez une photo nette de l'étiquette : le nom et la catégorie seront proposés automatiquement, à vérifier avant d'enregistrer.";
 
